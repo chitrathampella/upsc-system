@@ -1,0 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --system-blue: #00f2ff;
+  --system-purple: #7000ff;
+  --system-bg: #050505;
+}
+
+body {
+  background-color: var(--system-bg);
+  background-image: 
+    linear-gradient(rgba(0, 242, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 242, 255, 0.03) 1px, transparent 1px);
+  background-size: 30px 30px;
+  color: #e0e0e0;
+  font-family: 'Share Tech Mono', monospace;
+}
+
+.font-system { font-family: 'Orbitron', sans-serif; }
+
+/* The Scanline Effect */
+body::before {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  z-index: 9999;
+  background-size: 100% 2px, 3px 100%;
+  pointer-events: none;
+}
+
+.neon-border {
+  box-shadow: 0 0 10px rgba(0, 242, 255, 0.2), inset 0 0 5px rgba(0, 242, 255, 0.1);
+}
+
+.quest-card:hover {
+  background: linear-gradient(90deg, rgba(0, 242, 255, 0.05) 0%, transparent 100%);
+}
