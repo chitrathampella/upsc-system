@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db, auth } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { ArrowLeft, Save, LogOut, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Save, LogOut } from 'lucide-react';
 
 const Settings = ({ user }) => {
   const navigate = useNavigate();

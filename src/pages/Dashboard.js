@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
@@ -42,7 +42,7 @@ const Dashboard = ({ user }) => {
     setTimeLeft(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
   };
 
-  const fetchPlayerData = async () => {
+  const fetchPlayerData = useCallback(async () => {
     if (!user?.uid) return;
     try {
       const docRef = doc(db, "users", user.uid);
@@ -62,7 +62,24 @@ const Dashboard = ({ user }) => {
       }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  };
+  }, [user, navigate]); // Added dependencies here
+
+  useEffect(() => {
+    fetchPlayerData();
+    const timer = setInterval(() => {
+      const now = new Date();
+      const midnight = new Date();
+      midnight.setHours(24, 0, 0, 0);
+      const diff = midnight - now;
+      if (diff <= 0) window.location.reload();
+
+      const h = Math.floor(diff / (1000 * 60 * 60));
+      const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const s = Math.floor((diff % (1000 * 60)) / 1000);
+      setTimeLeft(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [fetchPlayerData]);
 
   const generateNewDailyQuests = async (data) => {
     const today = new Date().toISOString().split('T')[0];
