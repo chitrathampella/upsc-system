@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db, auth } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { ArrowLeft, Save, LogOut } from 'lucide-react';
+import { ArrowLeft, Save, LogOut, Cpu, Shield, Zap, BookOpen } from 'lucide-react';
 import { SYLLABUS_DATA } from '../data/syllabus';
 
 const Settings = ({ user }) => {
@@ -10,12 +10,10 @@ const Settings = ({ user }) => {
   const [formData, setFormData] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const bookList = SYLLABUS_DATA.map(book => book.title);
-
   useEffect(() => {
     const fetchData = async () => {
-      const docRef = doc(db, "users", user.uid);
-      const docSnap = await getDoc(docRef);
+      if (!user?.uid) return;
+      const docSnap = await getDoc(doc(db, "users", user.uid));
       if (docSnap.exists()) setFormData(docSnap.data());
       setLoading(false);
     };
@@ -33,55 +31,69 @@ const Settings = ({ user }) => {
     try {
       const userRef = doc(db, "users", user.uid);
       await updateDoc(userRef, { ...formData });
-      alert("SYSTEM UPDATED: Changes synchronized.");
       navigate('/dashboard');
-    } catch (e) { alert(e.message); }
+    } catch (e) { alert("Sync Failed: " + e.message); }
   };
 
-  const handleLogout = () => {
-    auth.signOut();
-    navigate('/');
-  };
-
-  if (loading || !formData) return <div className="h-screen bg-black flex items-center justify-center text-system-blue font-system italic">ACCESSING SYSTEM CONFIG...</div>;
+  if (loading || !formData) return (
+    <div className="h-screen bg-black flex flex-col items-center justify-center text-system-purple font-system italic animate-pulse">
+      <Cpu className="mb-4 animate-spin" />
+      ACCESSING_CONFIG_CORE...
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white font-system italic p-6 md:p-20">
-      <div className="max-w-4xl mx-auto">
-        <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 text-gray-500 hover:text-system-blue mb-10 transition-colors uppercase text-xs tracking-widest font-bold">
-          <ArrowLeft size={16} /> Return to HUD
-        </button>
+    <div className="min-h-screen bg-[#050505] text-white font-system italic p-4 md:p-12 select-none overflow-x-hidden">
+      <div className="max-w-5xl mx-auto">
+        
+        {/* HEADER NAVIGATION */}
+        <div className="flex justify-between items-center mb-10">
+          <button onClick={() => navigate('/dashboard')} className="group flex items-center gap-2 text-gray-600 hover:text-system-blue transition-all uppercase text-[10px] tracking-[0.4em] font-bold">
+            <ArrowLeft size={14} className="group-hover:-translate-x-1 transition-transform" /> 
+            HUD_RETURN
+          </button>
+          <div className="text-right">
+             <p className="text-[8px] text-system-purple font-bold tracking-widest uppercase">Security Clearance</p>
+             <p className="text-[10px] text-white font-black">LEVEL_0{formData.level}_MONARCH</p>
+          </div>
+        </div>
 
-        <h1 className="text-6xl font-black italic tracking-tighter uppercase mb-12 border-b border-gray-900 pb-6">
-          System <span className="text-system-purple text-4xl">Settings</span>
+        <h1 className="text-5xl font-black italic tracking-tighter uppercase mb-12 border-b-2 border-gray-900 pb-6 flex items-center gap-4">
+          SYSTEM <span className="text-system-purple">SETTINGS</span>
+          <div className="w-2 h-2 bg-system-purple animate-ping rounded-full ml-auto"></div>
         </h1>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-16">
-          <div className="space-y-8">
-            <div>
-              <label className="text-[10px] text-system-purple font-black uppercase tracking-[0.4em] mb-3 block">Player Alias</label>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+          
+          {/* LEFT: CHARACTER TRAITS */}
+          <div className="lg:col-span-5 space-y-10">
+            <div className="relative group">
+              <label className="text-[9px] text-system-purple font-black uppercase tracking-[0.5em] mb-3 block">Player Alias</label>
+              <div className="absolute -left-2 top-8 w-1 h-10 bg-system-purple opacity-50"></div>
               <input 
                 type="text" 
-                className="w-full bg-black border-b-2 border-gray-800 p-3 text-xl font-black italic outline-none focus:border-system-purple transition-all"
+                className="w-full bg-black/40 border-b border-gray-800 p-4 text-2xl font-black italic outline-none focus:border-system-purple focus:bg-system-purple/5 transition-all uppercase tracking-tighter"
                 value={formData.name}
                 onChange={(e) => setFormData({...formData, name: e.target.value})}
               />
             </div>
 
-            <div>
-              <label className="text-[10px] text-system-purple font-black uppercase tracking-[0.4em] mb-3 block">Daily Stamina (Hours)</label>
+            <div className="relative group">
+              <label className="text-[9px] text-system-purple font-black uppercase tracking-[0.5em] mb-3 block">Daily Stamina (Hours)</label>
+              <div className="absolute -left-2 top-8 w-1 h-10 bg-system-purple opacity-50"></div>
               <input 
                 type="number" 
-                className="w-full bg-black border-b-2 border-gray-800 p-3 text-xl font-black italic outline-none focus:border-system-purple"
+                className="w-full bg-black/40 border-b border-gray-800 p-4 text-2xl font-black italic outline-none focus:border-system-purple focus:bg-system-purple/5 transition-all"
                 value={formData.studyHours}
                 onChange={(e) => setFormData({...formData, studyHours: parseInt(e.target.value)})}
               />
             </div>
 
-            <div>
-              <label className="text-[10px] text-system-purple font-black uppercase tracking-[0.4em] mb-3 block">System Logic (Method)</label>
+            <div className="relative group">
+              <label className="text-[9px] text-system-purple font-black uppercase tracking-[0.5em] mb-3 block">Extraction Logic (Method)</label>
+              <div className="absolute -left-2 top-8 w-1 h-10 bg-system-purple opacity-50"></div>
               <select 
-                className="w-full bg-black border-b-2 border-gray-800 p-3 text-sm font-bold outline-none"
+                className="w-full bg-black border-b border-gray-800 p-4 text-sm font-bold outline-none cursor-pointer hover:bg-gray-900 transition-all uppercase tracking-widest"
                 value={formData.studyMethod}
                 onChange={(e) => setFormData({...formData, studyMethod: e.target.value})}
               >
@@ -89,37 +101,71 @@ const Settings = ({ user }) => {
                 <option value="subject-per-month">Subject Mastery (Focus One)</option>
               </select>
             </div>
+
+            {/* STATUS BOX */}
+            <div className="p-4 bg-system-purple/5 border border-system-purple/20 rounded-sm">
+                <div className="flex items-center gap-2 mb-2">
+                    <Shield size={14} className="text-system-purple" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-white">Logic Stability</span>
+                </div>
+                <p className="text-[9px] text-gray-500 font-mono leading-relaxed italic">
+                  Changes to study method will recalculate all Active Directives in the next Chrono Sync (Midnight).
+                </p>
+            </div>
           </div>
 
-          <div>
-            <label className="text-[10px] text-system-purple font-black uppercase tracking-[0.4em] mb-4 block">Active Grimoires (Books)</label>
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-4 custom-scrollbar">
-              {bookList.map(book => (
-                <div 
-                  key={book} 
-                  onClick={() => handleBookToggle(book)} 
-                  className={`p-4 text-xs font-bold cursor-pointer border transition-all ${formData.books.includes(book) ? 'border-system-purple bg-system-purple/10 text-white' : 'border-gray-900 text-gray-600'}`}
-                >
-                  {book}
-                </div>
-              ))}
+          {/* RIGHT: GRIMOIRE SLOTS */}
+          <div className="lg:col-span-7">
+            <div className="flex justify-between items-end mb-6">
+                <label className="text-[10px] text-system-purple font-black uppercase tracking-[0.5em] flex items-center gap-2">
+                  <BookOpen size={14} /> Active grimoires
+                </label>
+                <span className="text-[9px] text-gray-600 font-bold uppercase">{formData.books.length} / 12 EQUIPPED</span>
+            </div>
+            
+            <div className="bg-[#080808] border border-gray-900 p-2 space-y-2 max-h-[450px] overflow-y-auto custom-scrollbar">
+              {SYLLABUS_DATA.map((book) => {
+                const isSelected = formData.books.includes(book.title);
+                return (
+                  <div 
+                    key={book.title} 
+                    onClick={() => handleBookToggle(book.title)} 
+                    className={`p-4 border transition-all cursor-pointer flex items-center justify-between group ${isSelected ? 'border-system-purple/50 bg-system-purple/10 shadow-[0_0_15px_rgba(112,0,255,0.1)]' : 'border-gray-900 bg-black hover:border-gray-700'}`}
+                  >
+                    <div className="flex items-center gap-4">
+                        <div className={`w-2 h-2 rotate-45 transition-all ${isSelected ? 'bg-system-purple shadow-[0_0_8px_#7000ff]' : 'bg-gray-800'}`}></div>
+                        <div>
+                            <p className={`text-[11px] font-black uppercase tracking-tight transition-colors ${isSelected ? 'text-white' : 'text-gray-500'}`}>{book.title}</p>
+                            <p className="text-[8px] text-gray-700 uppercase font-bold tracking-widest">{book.subject}</p>
+                        </div>
+                    </div>
+                    {isSelected ? <Zap size={14} className="text-system-purple" fill="currentColor" /> : <div className="w-4" />}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col md:flex-row gap-6 mt-20">
+        {/* ACTIONS */}
+        <div className="flex flex-col md:flex-row gap-6 mt-16 pt-8 border-t border-gray-900">
           <button 
             onClick={saveSettings}
-            className="flex-1 bg-system-purple text-white py-4 font-black uppercase italic tracking-widest hover:bg-white hover:text-black transition-all flex items-center justify-center gap-3 shadow-[0_0_20px_rgba(112,0,255,0.3)]"
+            className="flex-[2] bg-system-purple text-white py-5 font-black uppercase italic tracking-[0.3em] hover:bg-white hover:text-black transition-all flex items-center justify-center gap-4 shadow-[0_0_30px_rgba(112,0,255,0.3)] active:scale-[0.98]"
           >
-            <Save size={18} /> Sync Changes
+            <Save size={20} /> SYNCHRONIZE_CHANGES
           </button>
+          
           <button 
-            onClick={handleLogout}
-            className="px-10 border-2 border-red-900 text-red-900 py-4 font-black uppercase italic text-xs hover:bg-red-900 hover:text-white transition-all flex items-center justify-center gap-3"
+            onClick={() => auth.signOut().then(() => navigate('/'))}
+            className="flex-1 border-2 border-red-900/50 text-red-900 py-5 font-black uppercase italic text-xs hover:bg-red-900 hover:text-white transition-all flex items-center justify-center gap-3 opacity-50 hover:opacity-100"
           >
-            <LogOut size={18} /> Terminate Session
+            <LogOut size={16} /> TERMINATE_SESSION
           </button>
+        </div>
+
+        <div className="mt-8 text-center">
+            <p className="text-[8px] text-gray-700 font-mono tracking-[1em] uppercase">End of Configuration Terminal</p>
         </div>
       </div>
     </div>
