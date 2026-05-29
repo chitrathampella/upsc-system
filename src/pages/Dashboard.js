@@ -5,7 +5,7 @@ import { doc, getDoc, updateDoc, collection, query, orderBy, limit, getDocs } fr
 import { 
   Settings, Zap, BookOpen, TrendingUp, CheckCircle2, 
   Book, Sword, Activity, Terminal, Shield, Trophy, 
-  Play, Pause, Layout, Cpu, Database
+  Play, Pause, Layout, Cpu, Database, Clock
 } from 'lucide-react';
 import { SYLLABUS_DATA } from '../data/syllabus';
 import Logo from '../components/Logo';
