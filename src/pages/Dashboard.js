@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { Settings, Zap, BookOpen, TrendingUp, CheckCircle2, Shield, Activity, Terminal } from 'lucide-react';
-
-import { SYLLABUS_DATA } from '../data/syllabus'; // Import the new data file
+// Added Book here to fix the "Book is not defined" error
+import { Settings, Zap, BookOpen, TrendingUp, CheckCircle2, Book } from 'lucide-react';
+import { SYLLABUS_DATA } from '../data/syllabus';
 import Logo from '../components/Logo';
 
 const Dashboard = ({ user }) => {
@@ -14,13 +14,13 @@ const Dashboard = ({ user }) => {
   const [dailyQuests, setDailyQuests] = useState([]);
   const [timeLeft, setTimeLeft] = useState("");
 
-const generateNewDailyQuests = useCallback(async (data) => {
+  // --- QUEST GENERATION LOGIC ---
+  const generateNewDailyQuests = useCallback(async (userData) => {
     const today = new Date().toISOString().split('T')[0];
-    const completed = data.completedChapters || [];
+    const completed = userData.completedChapters || [];
     let newQuests = [];
 
-    // Loop through user's selected books and find the next chapter from SYLLABUS_DATA
-    data.books.forEach(userBookTitle => {
+    userData.books.forEach(userBookTitle => {
       const bookData = SYLLABUS_DATA.find(b => b.title === userBookTitle);
       if (bookData) {
         const nextChapter = bookData.chapters.find(chap => 
@@ -30,7 +30,7 @@ const generateNewDailyQuests = useCallback(async (data) => {
           newQuests.push({ 
             book: userBookTitle, 
             topic: nextChapter.title, 
-            hours: nextChapter.hours, 
+            hours: nextChapter.hours || 2, 
             completed: false 
           });
         }
@@ -45,66 +45,48 @@ const generateNewDailyQuests = useCallback(async (data) => {
     setDailyQuests(newQuests);
   }, [user.uid]);
 
-
-
-  // --- 2. SYSTEM LOGIC: FETCH PLAYER DATA ---
+  // --- DATA FETCHING (Fixed Scoping Error) ---
   const fetchPlayerData = useCallback(async () => {
     if (!user?.uid) return;
     try {
       const docRef = doc(db, "users", user.uid);
       const docSnap = await getDoc(docRef);
-      // TEMPORARY CHANGE to force refresh:
-if (true) { // Change this from (data.lastQuestDate === today...) to (true)
-  generateNewDailyQuests(data);
-}
       if (docSnap.exists()) {
-        const data = docSnap.data();
-        setPlayerData(data);
+        const fetchedData = docSnap.data(); // This fixes 'data is not defined'
+        setPlayerData(fetchedData);
         
-
         const today = new Date().toISOString().split('T')[0];
-
-
-        // If it's the same day, load saved quests. If new day, generate new ones.
-        if (data.lastQuestDate === today && data.currentQuests) {
-          setDailyQuests(data.currentQuests);
+        if (fetchedData.lastQuestDate === today && fetchedData.currentQuests) {
+          setDailyQuests(fetchedData.currentQuests);
         } else {
-          generateNewDailyQuests(data);
+          generateNewDailyQuests(fetchedData);
         }
       } else {
         navigate('/onboarding');
       }
     } catch (e) {
-      console.error("Critical System Failure:", e);
+      console.error("System Error:", e);
     } finally {
       setLoading(false);
     }
   }, [user, navigate, generateNewDailyQuests]);
 
-
-  // --- 3. EFFECT: INITIALIZE & TIMER ---
   useEffect(() => {
     fetchPlayerData();
-    
-    const updateTimer = () => {
+    const timer = setInterval(() => {
       const now = new Date();
       const midnight = new Date();
       midnight.setHours(24, 0, 0, 0);
       const diff = midnight - now;
-
       if (diff <= 0) window.location.reload();
-
       const h = Math.floor(diff / (1000 * 60 * 60));
       const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
       const s = Math.floor((diff % (1000 * 60)) / 1000);
       setTimeLeft(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
-    };
-
-    const timerInterval = setInterval(updateTimer, 1000);
-    return () => clearInterval(timerInterval);
+    }, 1000);
+    return () => clearInterval(timer);
   }, [fetchPlayerData]);
 
-  // --- 4. ACTION: CLEAR QUEST ---
   const clearQuest = async (index) => {
     const updatedQuests = [...dailyQuests];
     const quest = updatedQuests[index];
@@ -129,175 +111,119 @@ if (true) { // Change this from (data.lastQuestDate === today...) to (true)
   };
 
   if (loading) return (
-    <div className="h-screen bg-black flex items-center justify-center text-system-blue font-system italic text-2xl animate-pulse">
-      SYNCHRONIZING WITH SYSTEM...
+    <div className="h-screen bg-black flex items-center justify-center text-system-blue font-system italic text-2xl animate-pulse tracking-[0.5em]">
+      RE-SYNCING SYSTEM...
     </div>
   );
+
   return (
-    <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-system italic p-6 md:p-10 select-none">
-      <Logo size={60} />
-      {/* --- HUD STATUS WINDOW (Top Bar) --- */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b-2 border-gray-900 pb-6 mb-10 gap-6">
-        <div className="relative">
-          <h1 className="text-6xl font-black italic tracking-tighter text-white uppercase leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.1)]">
-            {playerData?.name} <span className="text-system-blue text-2xl ml-2 font-normal">LVL {playerData?.level}</span>
-          </h1>
-          <div className="flex gap-4 mt-3">
-             <span className="text-[10px] text-system-purple font-bold tracking-[0.4em] uppercase border border-system-purple/30 px-3 py-0.5 bg-system-purple/5">E-RANK HUNTER</span>
-             <span className="text-[10px] text-gray-500 font-bold tracking-[0.4em] uppercase border border-gray-800 px-3 py-0.5">CLASS: {playerData?.studentType}</span>
+    <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-system italic p-6 md:p-12 select-none">
+      
+      {/* HUD HEADER */}
+      <div className="flex justify-between items-end border-b-2 border-gray-900 pb-8 mb-12 gap-6">
+        <div className="flex items-center gap-6">
+          <Logo size={60} />
+          <div>
+            <h1 className="text-7xl font-black italic tracking-tighter text-white uppercase leading-none">
+              {playerData?.name} <span className="text-system-blue text-3xl ml-2 font-normal">LVL {playerData?.level}</span>
+            </h1>
+            <p className="text-[10px] text-system-purple font-bold tracking-[0.4em] uppercase mt-2">RANK: E-RANK HUNTER</p>
           </div>
         </div>
 
-        <div className="flex-1 max-w-sm hidden lg:block px-10">
-            <div className="flex justify-between text-[9px] font-bold text-system-blue mb-1 uppercase tracking-widest">
-                <span>Stamina (Daily Streak)</span>
-                <span>100%</span>
-            </div>
-            <div className="h-1 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
-                <div className="h-full bg-system-blue shadow-[0_0_10px_#00f2ff]" style={{width: '85%'}}></div>
-            </div>
-            <div className="flex justify-between text-[9px] font-bold text-system-purple mt-3 mb-1 uppercase tracking-widest">
-                <span>Mana (Study Hours)</span>
-                <span>{playerData?.studyHours}H / {playerData?.studyHours}H</span>
-            </div>
-            <div className="h-1 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
-                <div className="h-full bg-system-purple shadow-[0_0_10px_#7000ff]" style={{width: '100%'}}></div>
-            </div>
-        </div>
-
-        <div className="flex items-center gap-6">
-            <div className="text-right">
-                <p className="text-[9px] text-gray-600 font-bold uppercase tracking-tighter">System Version</p>
-                <p className="text-xs font-mono text-white tracking-widest">v2.4.0_UPSC</p>
-            </div>
-            <button 
-              onClick={() => navigate('/settings')} 
-              className="p-3 border-2 border-gray-800 rounded-sm hover:border-system-blue hover:bg-system-blue/5 text-gray-500 hover:text-white transition-all group"
-            >
-              <Settings size={24} className="group-hover:rotate-90 transition-transform duration-500" />
-            </button>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => navigate('/library')} 
+            className="flex items-center gap-2 px-6 py-2 border-2 border-gray-800 hover:border-system-blue transition-all group"
+          >
+            <Book size={18} className="text-system-blue group-hover:scale-110 transition-transform" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-gray-500 group-hover:text-white">Library</span>
+          </button>
+          <button onClick={() => navigate('/settings')} className="p-2 text-gray-600 hover:text-system-blue transition-all">
+            <Settings size={28} />
+          </button>
         </div>
       </div>
-      // Near your Settings button in Dashboard.js:
-<div className="flex items-center gap-4">
-    <button 
-      onClick={() => navigate('/library')} 
-      className="flex items-center gap-2 px-4 py-2 border-2 border-gray-800 hover:border-system-blue transition-all"
-    >
-      <Book size={18} className="text-system-blue" />
-      <span className="text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-white">Library</span>
-    </button>
-    
-    <button onClick={() => navigate('/settings')} className="p-2 text-gray-600 hover:text-white transition-colors">
-       <Settings size={28} />
-    </button>
-</div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
         
-        {/* LEFT: MEMORY BANK (Syllabus Conquest) */}
-        <div className="lg:col-span-3 space-y-6">
-          <div className="bg-[#080808] border border-gray-900 p-6 rounded-sm relative overflow-hidden">
-             <div className="absolute top-0 right-0 p-2 opacity-10"><Activity size={40} /></div>
-             <h2 className="text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] mb-8 flex items-center gap-3">
-               <TrendingUp size={16} className="text-system-blue" /> Conquest Log
-             </h2>
-             <div className="space-y-4 max-h-[450px] overflow-y-auto custom-scrollbar pr-2">
-               {playerData?.completedChapters?.slice().reverse().map((item, i) => (
-                 <div key={i} className="group border-l-2 border-system-blue pl-4 py-2 hover:bg-system-blue/5 transition-all">
-                   <p className="text-[8px] text-system-blue font-bold uppercase tracking-widest mb-1">{item.split(':')[0]}</p>
-                   <p className="text-[11px] font-black text-white uppercase italic tracking-tight">{item.split(':')[1]}</p>
-                 </div>
-               ))}
-               {(!playerData?.completedChapters || playerData.completedChapters.length === 0) && (
-                 <div className="text-[10px] text-gray-700 font-mono italic p-4 border border-dashed border-gray-900">
-                    EMPTY_RECORD: No dungeons cleared.
-                 </div>
-               )}
-             </div>
+        {/* LEFT: CONQUEST LOG */}
+        <div className="lg:col-span-3">
+          <h2 className="text-xs font-black text-gray-500 flex items-center gap-3 uppercase tracking-[0.4em] mb-8 italic">
+            <TrendingUp size={16} className="text-system-blue" /> Conquest Log
+          </h2>
+          <div className="space-y-4 max-h-[500px] overflow-y-auto custom-scrollbar pr-4 border-l border-gray-900">
+            {playerData?.completedChapters?.slice().reverse().map((item, i) => (
+              <div key={i} className="border-l-2 border-system-blue pl-6 py-3 bg-system-blue/5">
+                <p className="text-[9px] text-system-blue font-bold uppercase tracking-widest">{item.split(':')[0]}</p>
+                <p className="text-sm font-black text-white uppercase italic mt-1">{item.split(':')[1]}</p>
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* CENTER: DAILY DIRECTIVES */}
-        <div className="lg:col-span-6 space-y-6">
-          <div className="flex justify-between items-end px-2 border-b border-gray-900 pb-2">
-            <h2 className="text-2xl font-black text-white flex items-center gap-4 uppercase tracking-[0.1em] italic">
-              <Zap size={24} className="text-system-blue" fill="currentColor" /> System Directives
+        {/* CENTER: SYSTEM DIRECTIVES (Slanted Wide Cards) */}
+        <div className="lg:col-span-6 space-y-8">
+          <div className="flex justify-between items-center mb-6 px-2">
+            <h2 className="text-3xl font-black text-system-blue flex items-center gap-4 uppercase italic tracking-widest">
+              <Zap size={30} fill="currentColor" /> System Directives
             </h2>
-            <div className="bg-system-blue/5 border border-system-blue/20 px-4 py-1">
-                <span className="text-[10px] font-mono text-system-blue font-bold uppercase tracking-[0.2em]">RESET IN: {timeLeft}</span>
+            <div className="text-right bg-system-blue/5 border border-system-blue/20 px-4 py-2">
+                <span className="text-[10px] font-mono text-system-blue font-bold uppercase tracking-[0.2em]">RESET: {timeLeft}</span>
             </div>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-6">
             {dailyQuests.map((quest, i) => (
               <div 
                 key={i} 
                 className={`group relative overflow-hidden border-2 transition-all duration-300 ${
                   quest.completed 
-                  ? 'bg-black/40 border-gray-900 opacity-40 shadow-none' 
-                  : 'bg-[#0a0a0a] border-gray-800 hover:border-system-blue shadow-[0_0_20px_rgba(0,0,0,0.5)]'
-                } p-6`}
+                  ? 'bg-black/40 border-gray-800 opacity-40' 
+                  : 'bg-[#0a0a0a] border-gray-800 hover:border-system-blue shadow-2xl'
+                } p-10`}
               >
-                <div className="flex justify-between items-center relative z-10">
-                  <div className="max-w-[70%]">
-                    <div className="flex items-center gap-3 mb-2">
-                       <span className="text-[9px] font-black text-system-blue uppercase tracking-[0.3em]">{quest.book.split(' - ')[0]}</span>
-                       <div className="w-1 h-1 bg-gray-700 rounded-full"></div>
-                       <span className="text-[9px] font-bold text-gray-600 uppercase">Quest ID: {1000 + i}</span>
-                    </div>
-                    <h3 className={`text-2xl font-black italic uppercase tracking-tighter transition-colors ${quest.completed ? 'text-gray-600 line-through' : 'text-white group-hover:text-system-blue'}`}>
+                <div className="relative z-10 flex justify-between items-center">
+                  <div className="max-w-[75%]">
+                    <p className="text-[10px] font-black text-system-blue uppercase tracking-[0.4em] mb-2">TARGET: {quest.book.split(' - ')[0]}</p>
+                    <h3 className={`text-5xl font-black italic tracking-tighter transition-colors uppercase leading-tight ${quest.completed ? 'text-gray-600 line-through' : 'text-white group-hover:text-system-blue'}`}>
                       {quest.topic}
                     </h3>
+                    {!quest.completed && <p className="text-[10px] text-gray-500 font-bold mt-4 uppercase tracking-[0.3em]">Estimated Stamina: {quest.hours} Hours</p>}
                   </div>
                   {quest.completed ? (
-                    <div className="flex flex-col items-center gap-1">
-                      <CheckCircle2 size={32} className="text-system-blue" />
-                      <span className="text-[8px] font-black text-system-blue uppercase">Cleared</span>
+                    <div className="flex flex-col items-center">
+                        <CheckCircle2 size={40} className="text-system-blue" />
+                        <span className="text-[8px] font-black text-system-blue uppercase mt-2">Cleared</span>
                     </div>
                   ) : (
                     <button 
                       onClick={() => clearQuest(i)}
-                      className="border-2 border-system-blue text-system-blue px-8 py-2 font-black italic uppercase text-xs hover:bg-system-blue hover:text-black transition-all active:scale-95 shadow-[0_0_15px_rgba(0,242,255,0.1)]"
+                      className="border-2 border-system-blue text-system-blue px-10 py-4 font-black italic uppercase text-sm hover:bg-system-blue hover:text-black transition-all shadow-[0_0_20px_rgba(0,242,255,0.2)]"
                     >
                       Clear
                     </button>
                   )}
                 </div>
                 {/* Visual HUD Skew */}
-                <div className="absolute top-0 right-0 w-32 h-full bg-gradient-to-l from-system-blue/5 to-transparent skew-x-12 translate-x-20 group-hover:translate-x-10 transition-transform duration-700"></div>
+                <div className="absolute top-0 right-0 w-48 h-full bg-gradient-to-l from-system-blue/10 to-transparent skew-x-12 translate-x-24 pointer-events-none group-hover:translate-x-10 transition-transform duration-700"></div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* RIGHT: INVENTORY (Grimoires) */}
-        <div className="lg:col-span-3 space-y-6">
-          <div className="bg-[#080808] border border-gray-900 p-6 rounded-sm">
-             <h2 className="text-[11px] font-black text-system-purple uppercase tracking-[0.4em] mb-8 flex items-center gap-3">
-               <BookOpen size={16} className="text-system-purple" /> Grimoires
-             </h2>
-             <div className="space-y-4">
-               {playerData?.books?.map((b, i) => (
-                 <div key={i} className="flex flex-col group border-b border-gray-900/50 pb-3 last:border-0 cursor-default">
-                   <div className="flex justify-between items-center mb-1">
-                      <span className="text-[8px] text-system-purple font-bold uppercase tracking-widest italic">Item Slot: 0{i+1}</span>
-                      <Shield size={10} className="text-gray-800" />
-                   </div>
-                   <span className="text-xs font-bold text-gray-500 group-hover:text-white transition-colors uppercase italic tracking-tight">{b}</span>
-                 </div>
-               ))}
-             </div>
-          </div>
-
-          <div className="p-4 bg-system-blue/5 border-l-2 border-system-blue">
-              <div className="flex items-center gap-2 mb-2">
-                 <Terminal size={14} className="text-system-blue" />
-                 <span className="text-[9px] font-black text-white uppercase tracking-widest">System Message</span>
+        {/* RIGHT: INVENTORY */}
+        <div className="lg:col-span-3">
+          <h2 className="text-xs font-black text-system-purple flex items-center gap-3 uppercase tracking-[0.4em] mb-8 italic">
+            <BookOpen size={18} className="text-system-purple" /> Inventory
+          </h2>
+          <div className="bg-[#080808] border border-gray-900 p-8 space-y-6">
+            {playerData?.books?.map((b, i) => (
+              <div key={i} className="flex flex-col group border-b border-gray-900/50 pb-4 last:border-0">
+                <span className="text-[9px] text-system-purple font-bold uppercase mb-1 tracking-widest italic">Item Slot: 0{i+1}</span>
+                <span className="text-[11px] font-black text-gray-500 group-hover:text-white transition-colors uppercase italic tracking-tighter leading-tight">{b}</span>
               </div>
-              <p className="text-[10px] text-gray-500 font-mono leading-relaxed italic">
-                Daily stamina replenished at 00:00. Unfinished quests will result in a Penalty.
-              </p>
+            ))}
           </div>
         </div>
 
@@ -305,4 +231,5 @@ if (true) { // Change this from (data.lastQuestDate === today...) to (true)
     </div>
   );
 };
+
 export default Dashboard;

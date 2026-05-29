@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { ArrowLeft, Book, CheckCircle, Lock } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Lock } from 'lucide-react'; // REMOVED 'Book' HERE
 import { SYLLABUS_DATA } from '../data/syllabus';
 
 const Library = ({ user }) => {
