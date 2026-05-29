@@ -23,19 +23,43 @@ const Library = ({ user }) => {
 
   // MANUAL CHAPTER TOGGLE (Catch-up Feature)
   const toggleChapter = async (bookTitle, chapterTitle) => {
-    const chapterId = `${bookTitle}:${chapterTitle}`;
-    let newHistory = [...(playerData.completedChapters || [])];
-    
-    if (newHistory.includes(chapterId)) {
-      newHistory = newHistory.filter(id => id !== chapterId);
-    } else {
-      newHistory.push(chapterId);
-    }
+  const chapterId = `${bookTitle}:${chapterTitle}`;
+  let newHistory = [...(playerData.completedChapters || [])];
+  let currentXP = playerData.xp || 0;
+  
+  const isAdding = !newHistory.includes(chapterId);
 
-    const userRef = doc(db, "users", user.uid);
-    await updateDoc(userRef, { completedChapters: newHistory });
-    setPlayerData({ ...playerData, completedChapters: newHistory });
-  };
+  if (isAdding) {
+    newHistory.push(chapterId);
+    currentXP += 100; // Grant XP for manual completion
+  } else {
+    newHistory = newHistory.filter(id => id !== chapterId);
+    currentXP = Math.max(0, currentXP - 100); // Penalty for removing completed status
+  }
+
+  // Recalculate Level based on new XP
+  const newLvl = Math.floor(currentXP / 500) + 1;
+
+  const userRef = doc(db, "users", user.uid);
+  
+  try {
+    await updateDoc(userRef, { 
+      completedChapters: newHistory,
+      xp: currentXP,
+      level: newLvl
+    });
+    
+    // Update local state so UI reacts instantly
+    setPlayerData({ 
+      ...playerData, 
+      completedChapters: newHistory, 
+      xp: currentXP, 
+      level: newLvl 
+    });
+  } catch (e) {
+    console.error("Sync Failure:", e);
+  }
+};
 
   if (loading) return (
     <div className="h-screen bg-black flex items-center justify-center text-system-blue font-system italic text-2xl animate-pulse">
