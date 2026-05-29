@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { db, auth } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { ArrowLeft, Save, LogOut } from 'lucide-react';
+import { SYLLABUS_DATA } from '../data/syllabus';
 
 const Settings = ({ user }) => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const bookList = ["M. Laxmikant - Polity", "Spectrum - Modern History", "Ramesh Singh - Economy", "GC Leong - Geography"];
+  const bookList = SYLLABUS_DATA.map(book => book.title);
 
   useEffect(() => {
     const fetchData = async () => {

@@ -73,21 +73,24 @@ const Library = ({ user }) => {
               {isOwned && (
                 <div className="p-4 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
                   {bookData.chapters.map((ch, idx) => {
-                    // Try both book naming conventions to ensure completion shows up
-                    const isDone = completed.includes(`${bookData.title}:${ch.title}`) || 
-                                   playerData?.books?.some(b => completed.includes(`${b}:${ch.title}`));
+  // --- THE DEEP SCANNER LOGIC ---
+  // This checks if any entry in your completed list contains this chapter's title
+  const isDone = completed.some(entry => {
+    const savedTitle = entry.split(':')[1]; // Get the chapter part of "Book:Chapter"
+    return savedTitle === ch.title;
+  });
 
-                    return (
-                      <div key={idx} className={`p-2 border transition-all flex items-center justify-between group ${isDone ? 'border-system-blue/40 bg-system-blue/5' : 'border-gray-900 bg-black'}`}>
-                        <div className="max-w-[80%]">
-                          <p className={`text-[9px] font-black uppercase italic leading-none truncate ${isDone ? 'text-white' : 'text-gray-700'}`}>
-                            {idx + 1}. {ch.title}
-                          </p>
-                        </div>
-                        {isDone ? <CheckCircle size={10} className="text-system-blue" /> : <Shield size={9} className="text-gray-950" />}
-                      </div>
-                    );
-                  })}
+  return (
+    <div key={idx} className={`p-2 border transition-all flex items-center justify-between group ${isDone ? 'border-system-blue/40 bg-system-blue/5' : 'border-gray-900 bg-black'}`}>
+      <div className="max-w-[80%]">
+        <p className={`text-[9px] font-black uppercase italic leading-none truncate ${isDone ? 'text-white' : 'text-gray-700'}`}>
+          {idx + 1}. {ch.title}
+        </p>
+      </div>
+      {isDone ? <CheckCircle size={10} className="text-system-blue" /> : <Shield size={9} className="text-gray-950" />}
+    </div>
+  );
+})}
                 </div>
               )}
             </div>

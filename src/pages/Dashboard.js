@@ -83,20 +83,31 @@ const Dashboard = ({ user }) => {
     return () => clearInterval(interval);
   }, [isRaidActive, raidTimer]);
 
-  const clearQuest = async () => {
-    const updatedQuests = [...dailyQuests];
-    updatedQuests[activeQuestIndex].completed = true;
-    const quest = updatedQuests[activeQuestIndex];
-    const chapterId = `${quest.book}:${quest.topic}`;
-    const newHistory = [...(playerData.completedChapters || []), chapterId];
-    const newXP = (playerData.xp || 0) + 100;
-    const newLvl = Math.floor(newXP / 500) + 1;
+  const clearQuest = async (index) => {
+  const updatedQuests = [...dailyQuests];
+  const quest = updatedQuests[index];
+  if (quest.completed) return;
 
-    await updateDoc(doc(db, "users", user.uid), { currentQuests: updatedQuests, completedChapters: newHistory, xp: newXP, level: newLvl });
-    setDailyQuests(updatedQuests);
-    setPlayerData({ ...playerData, level: newLvl, xp: newXP, completedChapters: newHistory });
-    setIsRaidActive(false);
-  };
+  updatedQuests[index].completed = true;
+  
+  // CRITICAL: chapterId must match the exact title in SYLLABUS_DATA
+  const chapterId = `${quest.book}:${quest.topic}`; 
+  const newHistory = [...(playerData.completedChapters || []), chapterId];
+  
+  const newXP = (playerData.xp || 0) + 100;
+  const newLvl = Math.floor(newXP / 500) + 1;
+
+  await updateDoc(doc(db, "users", user.uid), {
+    currentQuests: updatedQuests,
+    completedChapters: newHistory,
+    xp: newXP,
+    level: newLvl
+  });
+
+  setDailyQuests(updatedQuests);
+  setPlayerData({ ...playerData, level: newLvl, xp: newXP, completedChapters: newHistory });
+  setIsRaidActive(false);
+};
 
   // 1. Add this logic inside the Dashboard component before the return:
 
