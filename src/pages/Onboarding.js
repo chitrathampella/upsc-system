@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
 import { doc, setDoc } from 'firebase/firestore';
+import {SYLLABUS_DATA} from '../data/syllabus';
 
 const Onboarding = ({ user, setUser }) => {
   const navigate = useNavigate();
@@ -13,7 +14,7 @@ const Onboarding = ({ user, setUser }) => {
     books: []
   });
 
-  const bookList = ["M. Laxmikant - Polity", "Spectrum - Modern History", "Ramesh Singh - Economy", "GC Leong - Geography"];
+  const bookList = SYLLABUS_DATA.map(book => book.title);
 
   const handleBookToggle = (book) => {
     setFormData(prev => ({

@@ -4,12 +4,8 @@ import { db } from '../firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { Settings, Zap, BookOpen, TrendingUp, CheckCircle2, Shield, Activity, Terminal } from 'lucide-react';
 
-const SYLLABUS = {
-  "M. Laxmikant - Polity": ["Historical Background", "Making of Constitution", "Salient Features", "Preamble", "Union and Territory", "Citizenship", "Fundamental Rights", "DPSP", "Fundamental Duties", "Parliament"],
-  "Spectrum - Modern History": ["Sources of History", "Advent of Europeans", "British Expansion", "Revolt of 1857", "Social Reformers", "INC Foundation", "Gandhian Era"],
-  "Ramesh Singh - Economy": ["Intro to Economics", "Growth & Development", "Evolution of Economy", "Planning", "Economic Reforms", "Inflation", "Banking"],
-  "GC Leong - Geography": ["The Universe", "Earth's Crust", "Vulcanism", "Weathering", "Running Water", "Glaciation", "Climate Zones"]
-};
+import { SYLLABUS_DATA } from '../data/syllabus'; // Import the new data file
+import Logo from '../components/Logo';
 
 const Dashboard = ({ user }) => {
   const navigate = useNavigate();
@@ -18,78 +14,26 @@ const Dashboard = ({ user }) => {
   const [dailyQuests, setDailyQuests] = useState([]);
   const [timeLeft, setTimeLeft] = useState("");
 
-  useEffect(() => {
-    fetchPlayerData();
-    const timer = setInterval(updateTimer, 1000);
-    return () => clearInterval(timer);
-  }, [user]);
-
-  const updateTimer = () => {
-    const now = new Date();
-    const midnight = new Date();
-    midnight.setHours(24, 0, 0, 0);
-    const diff = midnight - now;
-
-    if (diff <= 0) {
-      window.location.reload(); // Hard reset at midnight
-    }
-
-    const h = Math.floor(diff / (1000 * 60 * 60));
-    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    const s = Math.floor((diff % (1000 * 60)) / 1000);
-    
-    // Formatting to HH:MM:SS
-    setTimeLeft(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
-  };
-
-  const fetchPlayerData = useCallback(async () => {
-    if (!user?.uid) return;
-    try {
-      const docRef = doc(db, "users", user.uid);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setPlayerData(data);
-        
-        const today = new Date().toISOString().split('T')[0];
-        if (data.lastQuestDate === today && data.currentQuests) {
-          setDailyQuests(data.currentQuests);
-        } else {
-          generateNewDailyQuests(data);
-        }
-      } else {
-        navigate('/onboarding');
-      }
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
-  }, [user, navigate]); // Added dependencies here
-
-  useEffect(() => {
-    fetchPlayerData();
-    const timer = setInterval(() => {
-      const now = new Date();
-      const midnight = new Date();
-      midnight.setHours(24, 0, 0, 0);
-      const diff = midnight - now;
-      if (diff <= 0) window.location.reload();
-
-      const h = Math.floor(diff / (1000 * 60 * 60));
-      const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      const s = Math.floor((diff % (1000 * 60)) / 1000);
-      setTimeLeft(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [fetchPlayerData]);
-
-  const generateNewDailyQuests = async (data) => {
+const generateNewDailyQuests = useCallback(async (data) => {
     const today = new Date().toISOString().split('T')[0];
     const completed = data.completedChapters || [];
     let newQuests = [];
 
-    data.books.forEach(book => {
-      const nextTopic = SYLLABUS[book]?.find(chap => !completed.includes(`${book}:${chap}`));
-      if (nextTopic) {
-        newQuests.push({ book, topic: nextTopic, completed: false });
+    // Loop through user's selected books and find the next chapter from SYLLABUS_DATA
+    data.books.forEach(userBookTitle => {
+      const bookData = SYLLABUS_DATA.find(b => b.title === userBookTitle);
+      if (bookData) {
+        const nextChapter = bookData.chapters.find(chap => 
+          !completed.includes(`${userBookTitle}:${chap.title}`)
+        );
+        if (nextChapter) {
+          newQuests.push({ 
+            book: userBookTitle, 
+            topic: nextChapter.title, 
+            hours: nextChapter.hours, 
+            completed: false 
+          });
+        }
       }
     });
 
@@ -99,8 +43,64 @@ const Dashboard = ({ user }) => {
       lastQuestDate: today
     });
     setDailyQuests(newQuests);
-  };
+  }, [user.uid]);
 
+
+
+  // --- 2. SYSTEM LOGIC: FETCH PLAYER DATA ---
+  const fetchPlayerData = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const docRef = doc(db, "users", user.uid);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setPlayerData(data);
+        
+
+        const today = new Date().toISOString().split('T')[0];
+
+
+        // If it's the same day, load saved quests. If new day, generate new ones.
+        if (data.lastQuestDate === today && data.currentQuests) {
+          setDailyQuests(data.currentQuests);
+        } else {
+          generateNewDailyQuests(data);
+        }
+      } else {
+        navigate('/onboarding');
+      }
+    } catch (e) {
+      console.error("Critical System Failure:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, navigate, generateNewDailyQuests]);
+
+
+  // --- 3. EFFECT: INITIALIZE & TIMER ---
+  useEffect(() => {
+    fetchPlayerData();
+    
+    const updateTimer = () => {
+      const now = new Date();
+      const midnight = new Date();
+      midnight.setHours(24, 0, 0, 0);
+      const diff = midnight - now;
+
+      if (diff <= 0) window.location.reload();
+
+      const h = Math.floor(diff / (1000 * 60 * 60));
+      const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const s = Math.floor((diff % (1000 * 60)) / 1000);
+      setTimeLeft(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
+    };
+
+    const timerInterval = setInterval(updateTimer, 1000);
+    return () => clearInterval(timerInterval);
+  }, [fetchPlayerData]);
+
+  // --- 4. ACTION: CLEAR QUEST ---
   const clearQuest = async (index) => {
     const updatedQuests = [...dailyQuests];
     const quest = updatedQuests[index];
@@ -124,11 +124,14 @@ const Dashboard = ({ user }) => {
     setPlayerData({ ...playerData, level: newLvl, xp: newXP, completedChapters: newHistory });
   };
 
-  if (loading) return <div className="h-screen bg-black flex items-center justify-center text-system-blue font-system italic text-2xl animate-pulse">SYNCHRONIZING WITH SYSTEM...</div>;
-
+  if (loading) return (
+    <div className="h-screen bg-black flex items-center justify-center text-system-blue font-system italic text-2xl animate-pulse">
+      SYNCHRONIZING WITH SYSTEM...
+    </div>
+  );
   return (
     <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-system italic p-6 md:p-10 select-none">
-      
+      <Logo size={60} />
       {/* --- HUD STATUS WINDOW (Top Bar) --- */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b-2 border-gray-900 pb-6 mb-10 gap-6">
         <div className="relative">
@@ -284,5 +287,4 @@ const Dashboard = ({ user }) => {
     </div>
   );
 };
-
 export default Dashboard;
