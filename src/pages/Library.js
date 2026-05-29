@@ -36,7 +36,9 @@ const Library = ({ user }) => {
 
       <div className="grid grid-cols-1 gap-12">
         {SYLLABUS_DATA.map((bookData) => {
-          const isOwned = playerData?.books?.includes(bookData.title);
+const isOwned = playerData?.books?.some(userBook => 
+  userBook.toLowerCase().includes(bookData.title.split(' - ')[0].toLowerCase())
+);
           const finished = bookData.chapters.filter(ch => completed.includes(`${bookData.title}:${ch.title}`)).length;
           const progress = Math.round((finished / bookData.chapters.length) * 100);
 

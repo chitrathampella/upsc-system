@@ -98,7 +98,26 @@ const Dashboard = ({ user }) => {
     setIsRaidActive(false);
   };
 
+  // 1. Add this logic inside the Dashboard component before the return:
+
+const calculateStats = () => {
+  if (!playerData || dailyQuests.length === 0) return { stamina: 100, mana: 0 };
+
+  // MANA: Percentage of daily quests cleared
+  const clearedCount = dailyQuests.filter(q => q.completed).length;
+  const mana = Math.round((clearedCount / dailyQuests.length) * 100);
+
+  // STAMINA: Based on your streak (we'll use level as a multiplier for now)
+  const stamina = Math.min(80 + (playerData.level * 2), 100);
+
+  return { stamina, mana };
+};
+
+const stats = calculateStats();
+
+
   if (loading) return <div className="h-screen bg-black flex items-center justify-center text-system-blue font-system italic animate-pulse text-4xl">SYNCING...</div>;
+
 
   return (
     <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-system italic p-4 md:p-8 select-none">
@@ -135,13 +154,13 @@ const Dashboard = ({ user }) => {
         </div>
 
         <div className="flex-1 max-w-md hidden xl:block px-10">
-          <div className="flex justify-between text-[9px] font-bold text-system-blue mb-1 uppercase tracking-widest"><span>STAMINA (CONSISTENCY)</span><span>{(playerData?.xp % 500) / 5}%</span></div>
+          <div className="flex justify-between text-[9px] font-bold text-system-blue mb-1 uppercase tracking-widest"><span>STAMINA (CONSISTENCY)</span><span>{stats.stamina}%</span></div>
           <div className="h-1 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
-            <div className="h-full bg-system-blue shadow-[0_0_10px_#00f2ff]" style={{width: `${(playerData?.xp % 500) / 5}%`}}></div>
+            <div className="h-full bg-system-blue shadow-[0_0_10px_#00f2ff]" style={{width: `${stats.stamina}%`}}></div>
           </div>
-          <div className="flex justify-between text-[9px] font-bold text-system-purple mt-3 mb-1 uppercase tracking-widest"><span>MANA (FOCUS)</span><span>{playerData?.studyHours}H</span></div>
+          <div className="flex justify-between text-[9px] font-bold text-system-purple mt-3 mb-1 uppercase tracking-widest"><span>MANA (FOCUS)</span><span>{stats.mana}%</span></div>
           <div className="h-1 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
-            <div className="h-full bg-system-purple shadow-[0_0_10px_#7000ff]" style={{width: '90%'}}></div>
+            <div className="h-full bg-system-purple shadow-[0_0_10px_#7000ff]" style={{width: `${stats.mana}%`}}></div>
           </div>
         </div>
 
@@ -182,7 +201,7 @@ const Dashboard = ({ user }) => {
         <div className="lg:col-span-6 space-y-6">
           <div className="flex justify-between items-end px-2 border-b border-gray-900 pb-2">
             <h2 className="text-2xl font-black text-white flex items-center gap-4 uppercase italic tracking-tighter">
-              <Zap size={24} className="text-system-blue" fill="currentColor" /> ACTIVE DIRECTIVES
+              <Zap size={22} className="text-system-blue" fill="currentColor" /> ACTIVE DIRECTIVES
             </h2>
             <div className="text-[10px] font-mono text-system-blue bg-system-blue/10 px-3 py-1 border border-system-blue/20 tracking-widest font-bold">SYSTEM_RESET: {timeLeft}</div>
           </div>
