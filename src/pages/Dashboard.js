@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
-import { Settings, Zap, BookOpen, TrendingUp, CheckCircle2, Book, Sword, Activity, Terminal, Shield, Trophy } from 'lucide-react';
+import { Settings, Zap, BookOpen, TrendingUp, CheckCircle2, Book, Sword, Activity, Terminal, Shield, Trophy, Play, Pause } from 'lucide-react';
 import { SYLLABUS_DATA } from '../data/syllabus';
 import Logo from '../components/Logo';
 
@@ -17,6 +17,11 @@ const Dashboard = ({ user }) => {
   const [isRaidActive, setIsRaidActive] = useState(false);
   const [raidTimer, setRaidTimer] = useState(1500); 
   const [activeQuestIndex, setActiveQuestIndex] = useState(null);
+
+  // --- NEW STOPWATCH STATE (YTP STYLE) ---
+  const [isTimerActive, setIsTimerActive] = useState(false);
+  const [sessionSeconds, setSessionSeconds] = useState(0);
+  const [totalSecondsToday, setTotalSecondsToday] = useState(0);
 
   const fetchLeaderboard = async () => {
     try {
@@ -41,8 +46,10 @@ const Dashboard = ({ user }) => {
       }
     });
 
-    await updateDoc(doc(db, "users", user.uid), { currentQuests: newQuests, lastQuestDate: today });
+    // Reset daily study time on new day
+    await updateDoc(doc(db, "users", user.uid), { currentQuests: newQuests, lastQuestDate: today, studyTimeToday: 0 });
     setDailyQuests(newQuests);
+    setTotalSecondsToday(0);
   }, [user.uid]);
 
   const fetchPlayerData = useCallback(async () => {
@@ -52,6 +59,8 @@ const Dashboard = ({ user }) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setPlayerData(data);
+        setTotalSecondsToday(data.studyTimeToday || 0);
+        
         const today = new Date().toISOString().split('T')[0];
         if (data.lastQuestDate === today && data.currentQuests) setDailyQuests(data.currentQuests);
         else generateNewDailyQuests(data);
@@ -77,58 +86,70 @@ const Dashboard = ({ user }) => {
     return () => clearInterval(timer);
   }, [fetchPlayerData]);
 
+  // --- STOPWATCH ENGINE ---
   useEffect(() => {
     let interval = null;
-    if (isRaidActive && raidTimer > 0) interval = setInterval(() => setRaidTimer(prev => prev - 1), 1000);
+    if (isTimerActive) {
+      interval = setInterval(() => {
+        setSessionSeconds(prev => prev + 1);
+      }, 1000);
+    } else {
+      clearInterval(interval);
+    }
     return () => clearInterval(interval);
+  }, [isTimerActive]);
+
+  const toggleStopwatch = async () => {
+    if (isTimerActive) {
+      const newTotal = totalSecondsToday + sessionSeconds;
+      await updateDoc(doc(db, "users", user.uid), { studyTimeToday: newTotal });
+      setTotalSecondsToday(newTotal);
+      setSessionSeconds(0);
+    }
+    setIsTimerActive(!isTimerActive);
+  };
+
+  const formatTime = (totalSecs) => {
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
+    const s = totalSecs % 60;
+    return `${h}h ${m}m ${s}s`;
+  };
+
+  useEffect(() => {
+    let raidInterval = null;
+    if (isRaidActive && raidTimer > 0) raidInterval = setInterval(() => setRaidTimer(prev => prev - 1), 1000);
+    return () => clearInterval(raidInterval);
   }, [isRaidActive, raidTimer]);
 
   const clearQuest = async (index) => {
-  const updatedQuests = [...dailyQuests];
-  const quest = updatedQuests[index];
-  if (quest.completed) return;
+    const updatedQuests = [...dailyQuests];
+    updatedQuests[activeQuestIndex].completed = true;
+    const quest = updatedQuests[activeQuestIndex];
+    const chapterId = `${quest.book}:${quest.topic}`;
+    const newHistory = [...(playerData.completedChapters || []), chapterId];
+    const newXP = (playerData.xp || 0) + 100;
+    const newLvl = Math.floor(newXP / 500) + 1;
 
-  updatedQuests[index].completed = true;
-  
-  // CRITICAL: chapterId must match the exact title in SYLLABUS_DATA
-  const chapterId = `${quest.book}:${quest.topic}`; 
-  const newHistory = [...(playerData.completedChapters || []), chapterId];
-  
-  const newXP = (playerData.xp || 0) + 100;
-  const newLvl = Math.floor(newXP / 500) + 1;
+    await updateDoc(doc(db, "users", user.uid), { currentQuests: updatedQuests, completedChapters: newHistory, xp: newXP, level: newLvl });
+    setDailyQuests(updatedQuests);
+    setPlayerData({ ...playerData, level: newLvl, xp: newXP, completedChapters: newHistory });
+    setIsRaidActive(false);
+  };
 
-  await updateDoc(doc(db, "users", user.uid), {
-    currentQuests: updatedQuests,
-    completedChapters: newHistory,
-    xp: newXP,
-    level: newLvl
-  });
+  const calculateStats = () => {
+    if (!playerData) return { stamina: 100, mana: 0 };
+    // Mana is now based on Stopwatch total vs Daily Target Hours
+    const targetSeconds = (playerData.studyHours || 1) * 3600;
+    const currentSeconds = totalSecondsToday + sessionSeconds;
+    const mana = Math.min(Math.round((currentSeconds / targetSeconds) * 100), 100);
+    const stamina = Math.min(80 + (playerData.level * 2), 100);
+    return { stamina, mana };
+  };
 
-  setDailyQuests(updatedQuests);
-  setPlayerData({ ...playerData, level: newLvl, xp: newXP, completedChapters: newHistory });
-  setIsRaidActive(false);
-};
-
-  // 1. Add this logic inside the Dashboard component before the return:
-
-const calculateStats = () => {
-  if (!playerData || dailyQuests.length === 0) return { stamina: 100, mana: 0 };
-
-  // MANA: Percentage of daily quests cleared
-  const clearedCount = dailyQuests.filter(q => q.completed).length;
-  const mana = Math.round((clearedCount / dailyQuests.length) * 100);
-
-  // STAMINA: Based on your streak (we'll use level as a multiplier for now)
-  const stamina = Math.min(80 + (playerData.level * 2), 100);
-
-  return { stamina, mana };
-};
-
-const stats = calculateStats();
-
+  const stats = calculateStats();
 
   if (loading) return <div className="h-screen bg-black flex items-center justify-center text-system-blue font-system italic animate-pulse text-4xl">SYNCING...</div>;
-
 
   return (
     <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-system italic p-4 md:p-8 select-none">
@@ -164,15 +185,21 @@ const stats = calculateStats();
           </div>
         </div>
 
-        <div className="flex-1 max-w-md hidden xl:block px-10">
-          <div className="flex justify-between text-[9px] font-bold text-system-blue mb-1 uppercase tracking-widest"><span>STAMINA (CONSISTENCY)</span><span>{stats.stamina}%</span></div>
-          <div className="h-1 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
-            <div className="h-full bg-system-blue shadow-[0_0_10px_#00f2ff]" style={{width: `${stats.stamina}%`}}></div>
-          </div>
-          <div className="flex justify-between text-[9px] font-bold text-system-purple mt-3 mb-1 uppercase tracking-widest"><span>MANA (FOCUS)</span><span>{stats.mana}%</span></div>
-          <div className="h-1 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
-            <div className="h-full bg-system-purple shadow-[0_0_10px_#7000ff]" style={{width: `${stats.mana}%`}}></div>
-          </div>
+        {/* --- MANA EXTRACTION TIMER (YTP STYLE) --- */}
+        <div className="bg-[#0a0a0a] border-2 border-gray-800 p-3 flex items-center gap-6 shadow-xl relative overflow-hidden group min-w-[280px]">
+            <div className="absolute top-0 left-0 h-full bg-system-blue/5 transition-all duration-1000" style={{width: `${stats.mana}%`}}></div>
+            <div className="relative z-10">
+                <p className="text-[8px] text-gray-500 font-black uppercase tracking-[0.3em] mb-1">Mana Extraction Instance</p>
+                <div className="text-2xl font-black text-white tracking-tighter font-mono">
+                    {formatTime(isTimerActive ? sessionSeconds : totalSecondsToday)}
+                </div>
+            </div>
+            <button 
+                onClick={toggleStopwatch}
+                className={`relative z-10 p-3 rounded-full transition-all ${isTimerActive ? 'bg-red-900/20 text-red-500 border border-red-500' : 'bg-system-blue/20 text-system-blue border border-system-blue shadow-[0_0_15px_rgba(0,242,255,0.3)]'}`}
+            >
+                {isTimerActive ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+            </button>
         </div>
 
         <div className="flex items-center gap-4">
@@ -187,6 +214,17 @@ const stats = calculateStats();
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* LEFT PANEL */}
         <div className="lg:col-span-3 space-y-6">
+          <div className="bg-[#080808] border border-gray-900 p-5">
+            <div className="flex justify-between text-[9px] font-bold text-system-blue mb-1 uppercase tracking-widest"><span>STAMINA (CONSISTENCY)</span><span>{stats.stamina}%</span></div>
+            <div className="h-1 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
+              <div className="h-full bg-system-blue shadow-[0_0_10px_#00f2ff]" style={{width: `${stats.stamina}%`}}></div>
+            </div>
+            <div className="flex justify-between text-[9px] font-bold text-system-purple mt-3 mb-1 uppercase tracking-widest"><span>MANA (FOCUS)</span><span>{stats.mana}%</span></div>
+            <div className="h-1 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
+              <div className="h-full bg-system-purple shadow-[0_0_10px_#7000ff]" style={{width: `${stats.mana}%`}}></div>
+            </div>
+          </div>
+          
           <div className="bg-[#080808] border border-gray-900 p-5 relative overflow-hidden">
             <h2 className="text-[10px] font-black text-system-blue uppercase tracking-[0.4em] mb-6 flex items-center gap-3"><Trophy size={14}/> Hall of Hunters</h2>
             <div className="space-y-3">
@@ -208,11 +246,11 @@ const stats = calculateStats();
           </div>
         </div>
 
-        {/* CENTER PANEL (Middle Path Sizing) */}
+        {/* CENTER PANEL */}
         <div className="lg:col-span-6 space-y-6">
           <div className="flex justify-between items-end px-2 border-b border-gray-900 pb-2">
             <h2 className="text-2xl font-black text-white flex items-center gap-4 uppercase italic tracking-tighter">
-              <Zap size={22} className="text-system-blue" fill="currentColor" /> ACTIVE DIRECTIVES
+              <Zap size={24} className="text-system-blue" fill="currentColor" /> ACTIVE DIRECTIVES
             </h2>
             <div className="text-[10px] font-mono text-system-blue bg-system-blue/10 px-3 py-1 border border-system-blue/20 tracking-widest font-bold">SYSTEM_RESET: {timeLeft}</div>
           </div>
