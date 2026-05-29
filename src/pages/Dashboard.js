@@ -29,28 +29,24 @@ const Dashboard = ({ user }) => {
 
   // --- 1. DYNAMIC SYSTEM LOGIC (REACTIVE STATS) ---
   const stats = useMemo(() => {
-    if (!playerData) return { stamina: 0, mana: 0, rank: "E-RANK" };
+  if (!playerData) return { stamina: 0, mana: 0, rank: "E-RANK" };
 
-    // MANA: Percentage of daily hours completed (Reactive to live Stopwatch)
-    const targetSeconds = (playerData.studyHours || 1) * 3600;
-    const currentSeconds = totalSecondsToday + sessionSeconds;
-    const manaPercent = Math.min(Math.round((currentSeconds / targetSeconds) * 100), 100);
+  // MANA: Based on Seconds Studied vs Daily Goal Hours
+  const targetSeconds = (playerData.studyHours || 4) * 3600;
+  const currentSeconds = totalSecondsToday + sessionSeconds;
+  const manaPercent = Math.min(Math.round((currentSeconds / targetSeconds) * 100), 100);
 
-    // STAMINA: Progress to next Level (Based on XP)
-    const currentXP = playerData.xp || 0;
-    const xpTowardsNextLevel = currentXP % 500;
-    const staminaPercent = Math.round((xpTowardsNextLevel / 500) * 100);
+  // STAMINA: Progress to NEXT LEVEL (Current XP % 500)
+  const currentXP = playerData.xp || 0;
+  const xpTowardsNextLevel = currentXP % 500;
+  const staminaPercent = Math.round((xpTowardsNextLevel / 500) * 100);
 
-    // RANK: Based on Level
-    let rank = "E-RANK";
-    if (playerData.level > 50) rank = "S-RANK";
-    else if (playerData.level > 35) rank = "A-RANK";
-    else if (playerData.level > 20) rank = "B-RANK";
-    else if (playerData.level > 10) rank = "C-RANK";
-    else if (playerData.level > 5) rank = "D-RANK";
+  let rank = "E-RANK";
+  if (playerData.level > 5) rank = "D-RANK";
+  if (playerData.level > 10) rank = "C-RANK";
 
-    return { mana: manaPercent, stamina: staminaPercent, rank };
-  }, [playerData, totalSecondsToday, sessionSeconds]);
+  return { mana: manaPercent, stamina: staminaPercent, rank };
+}, [playerData, totalSecondsToday, sessionSeconds]);
 
   // --- 2. DATABASE FETCHING ---
   const fetchLeaderboard = async () => {
@@ -157,27 +153,36 @@ const Dashboard = ({ user }) => {
   };
 
   const clearQuest = async () => {
-    if (activeQuestIndex === null) return;
-    const updatedQuests = [...dailyQuests];
-    updatedQuests[activeQuestIndex].completed = true;
-    const quest = updatedQuests[activeQuestIndex];
-    const chapterId = `${quest.book}:${quest.topic}`;
-    const newHistory = [...(playerData.completedChapters || []), chapterId];
-    const newXP = (playerData.xp || 0) + 100;
-    const newLvl = Math.floor(newXP / 500) + 1;
+  if (activeQuestIndex === null) return;
+  const updated = [...dailyQuests];
+  updated[activeQuestIndex].completed = true;
+  const quest = updated[activeQuestIndex];
+  
+  const chapterId = `${quest.book}:${quest.topic}`;
+  const newHistory = [...(playerData.completedChapters || []), chapterId];
+  
+  // XP Logic
+  const newXP = (playerData.xp || 0) + 100;
+  const newLvl = Math.floor(newXP / 500) + 1;
 
-    await updateDoc(doc(db, "users", user.uid), { 
-      currentQuests: updatedQuests, 
-      completedChapters: newHistory, 
-      xp: newXP, 
-      level: newLvl 
-    });
+  // NEW: Add "Quest Mana" (Adds 1 hour worth of seconds to the daily total per quest)
+  const manaBoost = 3600; // 1 hour boost
+  const newTotalTime = (playerData.studyTimeToday || 0) + manaBoost;
 
-    setDailyQuests(updatedQuests);
-    setPlayerData({ ...playerData, level: newLvl, xp: newXP, completedChapters: newHistory });
-    setIsRaidActive(false);
-    setActiveQuestIndex(null);
-  };
+  await updateDoc(doc(db, "users", user.uid), { 
+    currentQuests: updated, 
+    completedChapters: newHistory, 
+    xp: newXP, 
+    level: newLvl,
+    studyTimeToday: newTotalTime // Update time in DB
+  });
+
+  setDailyQuests(updated);
+  setTotalSecondsToday(newTotalTime); // Update local state so bar moves
+  setPlayerData({ ...playerData, level: newLvl, xp: newXP, completedChapters: newHistory, studyTimeToday: newTotalTime });
+  setIsRaidActive(false);
+  setActiveQuestIndex(null);
+};
 
   const formatTime = (totalSecs) => {
     const h = Math.floor(totalSecs / 3600);
