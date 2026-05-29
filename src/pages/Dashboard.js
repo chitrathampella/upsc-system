@@ -53,6 +53,10 @@ const generateNewDailyQuests = useCallback(async (data) => {
     try {
       const docRef = doc(db, "users", user.uid);
       const docSnap = await getDoc(docRef);
+      // TEMPORARY CHANGE to force refresh:
+if (true) { // Change this from (data.lastQuestDate === today...) to (true)
+  generateNewDailyQuests(data);
+}
       if (docSnap.exists()) {
         const data = docSnap.data();
         setPlayerData(data);
@@ -174,6 +178,20 @@ const generateNewDailyQuests = useCallback(async (data) => {
             </button>
         </div>
       </div>
+      // Near your Settings button in Dashboard.js:
+<div className="flex items-center gap-4">
+    <button 
+      onClick={() => navigate('/library')} 
+      className="flex items-center gap-2 px-4 py-2 border-2 border-gray-800 hover:border-system-blue transition-all"
+    >
+      <Book size={18} className="text-system-blue" />
+      <span className="text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-white">Library</span>
+    </button>
+    
+    <button onClick={() => navigate('/settings')} className="p-2 text-gray-600 hover:text-white transition-colors">
+       <Settings size={28} />
+    </button>
+</div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         

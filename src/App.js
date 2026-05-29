@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Onboarding from './pages/Onboarding';
 import Settings from './pages/Settings';
+import Library from './pages/Library';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -34,6 +35,7 @@ function App() {
           <Route path="/onboarding" element={user ? <Onboarding user={user} setUser={setUser} /> : <Navigate to="/" />} />
           <Route path="/dashboard" element={user ? <Dashboard user={user} /> : <Navigate to="/" />} />
           <Route path="/settings" element={user ? <Settings user={user} /> : <Navigate to="/" />} />
+          <Route path="/library" element={user ? <Library user={user} /> : <Navigate to="/" />} />
         </Routes>
       </div>
     </Router>
