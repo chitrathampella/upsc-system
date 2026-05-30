@@ -57,30 +57,42 @@ const Dashboard = ({ user }) => {
     } catch (e) { console.error("Leaderboard Offline", e); }
   };
 
-  const generateNewDailyQuests = useCallback(async (userData) => {
+const generateNewDailyQuests = useCallback(async (userData) => {
     const today = new Date().toISOString().split('T')[0];
+    const dayOfWeek = new Date().getDay(); // 0 = Sun, 6 = Sat
     const completed = userData.completedChapters || [];
     let newQuests = [];
 
-    userData.books.forEach(userBookTitle => {
-      // SMART SEARCH: Find book by keyword if exact match fails
-      const bookData = SYLLABUS_DATA.find(b => 
-        b.title === userBookTitle || 
-        userBookTitle.toLowerCase().includes(b.subject.toLowerCase())
-      );
-      
-      if (bookData) {
-        const next = bookData.chapters.find(chap => !completed.some(c => c.includes(chap.title)));
-        if (next) {
-            newQuests.push({ 
-                book: bookData.title, 
-                topic: next.title, 
-                hours: next.hours || 2, 
-                completed: false 
-            });
-        }
-      }
-    });
+    // --- SATURDAY: REVISION & CURRENT AFFAIRS ---
+    if (dayOfWeek === 6) { 
+        newQuests.push({ 
+            book: "SYSTEM", topic: "Weekly Current Affairs Recap", 
+            hours: 3, completed: false, type: 'special' 
+        });
+        newQuests.push({ 
+            book: "MAINTENANCE", topic: "Core Revision: All Weekly Topics", 
+            hours: userData.studyHours || 4, completed: false, type: 'special' 
+        });
+    } 
+    // --- SUNDAY: FULL MOCK TEST ---
+    else if (dayOfWeek === 0) { 
+        newQuests.push({ 
+            book: "EMERGENCY", topic: "Full Length Mock Dungeon (GS + CSAT)", 
+            hours: 4, completed: false, type: 'emergency' 
+        });
+    } 
+    // --- WEEKDAYS: STANDARD CHAPTER GRIND ---
+    else {
+        userData.books.forEach(userBookTitle => {
+          const bookData = SYLLABUS_DATA.find(b => 
+            b.title === userBookTitle || userBookTitle.toLowerCase().includes(b.subject.toLowerCase())
+          );
+          if (bookData) {
+            const next = bookData.chapters.find(chap => !completed.some(c => c.includes(chap.title)));
+            if (next) newQuests.push({ book: bookData.title, topic: next.title, hours: next.hours || 2, completed: false });
+          }
+        });
+    }
 
     await updateDoc(doc(db, "users", user.uid), { 
         currentQuests: newQuests, 
@@ -96,24 +108,32 @@ const Dashboard = ({ user }) => {
     try {
       const docSnap = await getDoc(doc(db, "users", user.uid));
       if (docSnap.exists()) {
-        const fetchedData = docSnap.data();
-        setPlayerData(fetchedData);
-        setTotalSecondsToday(fetchedData.studyTimeToday || 0);
+        const data = docSnap.data();
+        setPlayerData(data);
+        setTotalSecondsToday(data.studyTimeToday || 0);
         
         const today = new Date().toISOString().split('T')[0];
-        if (fetchedData.lastQuestDate === today && fetchedData.currentQuests && fetchedData.currentQuests.length > 0) {
-          setDailyQuests(fetchedData.currentQuests);
+        const dayOfWeek = new Date().getDay();
+        const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+
+        // FORCE RESET LOGIC: 
+        // If it's a new day OR it's the weekend but we have standard quests... re-generate!
+        const currentIsSpecial = data.currentQuests?.some(q => q.type === 'special' || q.type === 'emergency');
+        
+        if (data.lastQuestDate !== today || (isWeekend && !currentIsSpecial)) {
+          console.log("Weekend Detected: Generating Special Quests...");
+          generateNewDailyQuests(data);
         } else {
-          generateNewDailyQuests(fetchedData);
+          setDailyQuests(data.currentQuests || []);
         }
+        
         fetchLeaderboard();
       } else {
         navigate('/onboarding');
       }
-    } catch (e) { console.error("Sync Failure", e); }
+    } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, [user, navigate, generateNewDailyQuests]);
-
   // --- 3. SYSTEM TIMERS ---
   useEffect(() => {
     fetchPlayerData();
