@@ -15,6 +15,7 @@ const Dashboard = ({ user }) => {
   const [playerData, setPlayerData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dailyQuests, setDailyQuests] = useState([]);
+  const [backlog, setBacklog] = useState([]); // Penalty Quests
   const [timeLeft, setTimeLeft] = useState("");
   const [leaderboard, setLeaderboard] = useState([]);
   
@@ -29,24 +30,25 @@ const Dashboard = ({ user }) => {
 
   // --- 1. DYNAMIC SYSTEM LOGIC (REACTIVE STATS) ---
   const stats = useMemo(() => {
-  if (!playerData) return { stamina: 0, mana: 0, rank: "E-RANK" };
+    if (!playerData) return { stamina: 0, mana: 0, rank: "E-RANK" };
 
-  // MANA: Based on Seconds Studied vs Daily Goal Hours
-  const targetSeconds = (playerData.studyHours || 4) * 3600;
-  const currentSeconds = totalSecondsToday + sessionSeconds;
-  const manaPercent = Math.min(Math.round((currentSeconds / targetSeconds) * 100), 100);
+    // MANA: Reactive to live Stopwatch vs Daily Goal
+    const targetSeconds = (playerData.studyHours || 4) * 3600;
+    const currentSeconds = totalSecondsToday + sessionSeconds;
+    const manaPercent = Math.min(Math.round((currentSeconds / targetSeconds) * 100), 100);
 
-  // STAMINA: Progress to NEXT LEVEL (Current XP % 500)
-  const currentXP = playerData.xp || 0;
-  const xpTowardsNextLevel = currentXP % 500;
-  const staminaPercent = Math.round((xpTowardsNextLevel / 500) * 100);
+    // STAMINA: Progress to next Level (Based on XP % 500)
+    const currentXP = playerData.xp || 0;
+    const xpTowardsNextLevel = currentXP % 500;
+    const staminaPercent = Math.round((xpTowardsNextLevel / 500) * 100);
 
-  let rank = "E-RANK";
-  if (playerData.level > 5) rank = "D-RANK";
-  if (playerData.level > 10) rank = "C-RANK";
+    let rank = "E-RANK";
+    if (playerData.level > 50) rank = "S-RANK";
+    else if (playerData.level > 20) rank = "B-RANK";
+    else if (playerData.level > 5) rank = "D-RANK";
 
-  return { mana: manaPercent, stamina: staminaPercent, rank };
-}, [playerData, totalSecondsToday, sessionSeconds]);
+    return { mana: manaPercent, stamina: staminaPercent, rank };
+  }, [playerData, totalSecondsToday, sessionSeconds]);
 
   // --- 2. DATABASE FETCHING ---
   const fetchLeaderboard = async () => {
@@ -57,32 +59,25 @@ const Dashboard = ({ user }) => {
     } catch (e) { console.error("Leaderboard Offline", e); }
   };
 
-const generateNewDailyQuests = useCallback(async (userData) => {
+  const generateNewDailyQuests = useCallback(async (userData, oldQuests = []) => {
     const today = new Date().toISOString().split('T')[0];
-    const dayOfWeek = new Date().getDay(); // 0 = Sun, 6 = Sat
+    const dayOfWeek = new Date().getDay(); // 0=Sun, 6=Sat
     const completed = userData.completedChapters || [];
+    
+    // BACKLOG LOGIC: Migrate unfinished quests to penalty
+    const unfinished = oldQuests.filter(q => !q.completed);
+    const newBacklog = [...(userData.backlog || []), ...unfinished];
+
     let newQuests = [];
 
-    // --- SATURDAY: REVISION & CURRENT AFFAIRS ---
-    if (dayOfWeek === 6) { 
-        newQuests.push({ 
-            book: "SYSTEM", topic: "Weekly Current Affairs Recap", 
-            hours: 3, completed: false, type: 'special' 
-        });
-        newQuests.push({ 
-            book: "MAINTENANCE", topic: "Core Revision: All Weekly Topics", 
-            hours: userData.studyHours || 4, completed: false, type: 'special' 
-        });
-    } 
-    // --- SUNDAY: FULL MOCK TEST ---
-    else if (dayOfWeek === 0) { 
-        newQuests.push({ 
-            book: "EMERGENCY", topic: "Full Length Mock Dungeon (GS + CSAT)", 
-            hours: 4, completed: false, type: 'emergency' 
-        });
-    } 
-    // --- WEEKDAYS: STANDARD CHAPTER GRIND ---
-    else {
+    // --- WEEKEND OVERRIDE ---
+    if (dayOfWeek === 6) { // SATURDAY
+        newQuests.push({ book: "SYSTEM", topic: "Weekly Current Affairs Recap", hours: 3, completed: false, type: 'special' });
+        newQuests.push({ book: "MAINTENANCE", topic: "Core Revision: All Weekly Topics", hours: userData.studyHours, completed: false, type: 'special' });
+    } else if (dayOfWeek === 0) { // SUNDAY
+        newQuests.push({ book: "EMERGENCY", topic: "Full Length Mock Dungeon (GS + CSAT)", hours: 4, completed: false, type: 'emergency' });
+    } else {
+        // WEEKDAYS
         userData.books.forEach(userBookTitle => {
           const bookData = SYLLABUS_DATA.find(b => 
             b.title === userBookTitle || userBookTitle.toLowerCase().includes(b.subject.toLowerCase())
@@ -97,9 +92,11 @@ const generateNewDailyQuests = useCallback(async (userData) => {
     await updateDoc(doc(db, "users", user.uid), { 
         currentQuests: newQuests, 
         lastQuestDate: today, 
+        backlog: newBacklog,
         studyTimeToday: 0 
     });
     setDailyQuests(newQuests);
+    setBacklog(newBacklog);
     setTotalSecondsToday(0);
   }, [user.uid]);
 
@@ -111,29 +108,27 @@ const generateNewDailyQuests = useCallback(async (userData) => {
         const data = docSnap.data();
         setPlayerData(data);
         setTotalSecondsToday(data.studyTimeToday || 0);
+        setBacklog(data.backlog || []);
         
         const today = new Date().toISOString().split('T')[0];
         const dayOfWeek = new Date().getDay();
         const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
-
-        // FORCE RESET LOGIC: 
-        // If it's a new day OR it's the weekend but we have standard quests... re-generate!
         const currentIsSpecial = data.currentQuests?.some(q => q.type === 'special' || q.type === 'emergency');
-        
+
+        // Check if day changed OR if it's weekend but we still have weekday quests
         if (data.lastQuestDate !== today || (isWeekend && !currentIsSpecial)) {
-          console.log("Weekend Detected: Generating Special Quests...");
-          generateNewDailyQuests(data);
+          generateNewDailyQuests(data, data.currentQuests || []);
         } else {
           setDailyQuests(data.currentQuests || []);
         }
-        
         fetchLeaderboard();
       } else {
         navigate('/onboarding');
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Sync Failure", e); }
     finally { setLoading(false); }
   }, [user, navigate, generateNewDailyQuests]);
+
   // --- 3. SYSTEM TIMERS ---
   useEffect(() => {
     fetchPlayerData();
@@ -172,37 +167,42 @@ const generateNewDailyQuests = useCallback(async (userData) => {
     setIsTimerActive(!isTimerActive);
   };
 
-  const clearQuest = async () => {
-  if (activeQuestIndex === null) return;
-  const updated = [...dailyQuests];
-  updated[activeQuestIndex].completed = true;
-  const quest = updated[activeQuestIndex];
-  
-  const chapterId = `${quest.book}:${quest.topic}`;
-  const newHistory = [...(playerData.completedChapters || []), chapterId];
-  
-  // XP Logic
-  const newXP = (playerData.xp || 0) + 100;
-  const newLvl = Math.floor(newXP / 500) + 1;
+  const clearQuest = async (index, isBacklog = false) => {
+    const targetIdx = index !== undefined ? index : activeQuestIndex;
+    const updatedQuests = isBacklog ? [...backlog] : [...dailyQuests];
+    const quest = updatedQuests[targetIdx];
+    
+    const chapterId = `${quest.book}:${quest.topic}`;
+    const newHistory = quest.type ? (playerData.completedChapters || []) : [...(playerData.completedChapters || []), chapterId];
+    
+    const newXP = (playerData.xp || 0) + 100;
+    const newLvl = Math.floor(newXP / 500) + 1;
 
-  // NEW: Add "Quest Mana" (Adds 1 hour worth of seconds to the daily total per quest)
-  const manaBoost = 3600; // 1 hour boost
-  const newTotalTime = (playerData.studyTimeToday || 0) + manaBoost;
+    // Update time based on cleared quest (1 hour boost)
+    const newTime = (playerData.studyTimeToday || 0) + 3600;
 
-  await updateDoc(doc(db, "users", user.uid), { 
-    currentQuests: updated, 
-    completedChapters: newHistory, 
-    xp: newXP, 
-    level: newLvl,
-    studyTimeToday: newTotalTime // Update time in DB
-  });
+    const updateObj = { 
+        completedChapters: newHistory, 
+        xp: newXP, 
+        level: newLvl, 
+        studyTimeToday: newTime 
+    };
 
-  setDailyQuests(updated);
-  setTotalSecondsToday(newTotalTime); // Update local state so bar moves
-  setPlayerData({ ...playerData, level: newLvl, xp: newXP, completedChapters: newHistory, studyTimeToday: newTotalTime });
-  setIsRaidActive(false);
-  setActiveQuestIndex(null);
-};
+    if (isBacklog) {
+        const filteredBacklog = backlog.filter((_, i) => i !== targetIdx);
+        updateObj.backlog = filteredBacklog;
+        setBacklog(filteredBacklog);
+    } else {
+        updatedQuests[targetIdx].completed = true;
+        updateObj.currentQuests = updatedQuests;
+        setDailyQuests(updatedQuests);
+    }
+
+    await updateDoc(doc(db, "users", user.uid), updateObj);
+    setPlayerData({ ...playerData, level: newLvl, xp: newXP, completedChapters: newHistory, studyTimeToday: newTime });
+    setTotalSecondsToday(newTime);
+    setIsRaidActive(false);
+  };
 
   const formatTime = (totalSecs) => {
     const h = Math.floor(totalSecs / 3600);
@@ -225,7 +225,7 @@ const generateNewDailyQuests = useCallback(async (userData) => {
       {isRaidActive && (
         <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col items-center justify-center border-4 border-red-900/10 backdrop-blur-md">
           <Sword className="text-red-600 mb-8 animate-bounce" size={80} />
-          <h2 className="text-red-500 text-sm font-black tracking-[0.5em] mb-4 uppercase">Dungeon Instance Active</h2>
+          <h2 className="text-red-500 text-sm font-black tracking-[0.8em] mb-4 uppercase">Dungeon Instance Active</h2>
           <div className="text-center mb-10">
              <p className="text-gray-600 text-[8px] uppercase tracking-widest mb-1 italic">Active Mission Objective</p>
              <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter drop-shadow-[0_0_20px_rgba(255,255,255,0.2)]">
@@ -254,7 +254,7 @@ const generateNewDailyQuests = useCallback(async (userData) => {
         </div>
       )}
 
-      {/* --- HEADER HUD (THE TOP BAR) --- */}
+      {/* --- HEADER HUD --- */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b-2 border-gray-900 pb-4 mb-8 gap-6 relative">
         <div className="flex items-center gap-5">
           <div className="relative group">
@@ -306,7 +306,7 @@ const generateNewDailyQuests = useCallback(async (userData) => {
           </div>
           <button 
             onClick={() => navigate('/library')} 
-            className="flex items-center gap-2 px-5 py-2 border border-gray-800 hover:border-system-blue bg-black transition-all group shadow-md"
+            className="flex items-center gap-2 px-5 py-2 border border-gray-800 hover:border-system-blue bg-black transition-all group"
           >
             <Book size={18} className="text-system-blue group-hover:scale-110 transition-transform" />
             <span className="text-[9px] font-black uppercase text-gray-500 group-hover:text-white tracking-[0.2em]">Archives</span>
@@ -320,7 +320,6 @@ const generateNewDailyQuests = useCallback(async (userData) => {
         </div>
       </div>
 
-      {/* --- MAIN GRID LAYOUT --- */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* LEFT PANEL */}
@@ -349,6 +348,24 @@ const generateNewDailyQuests = useCallback(async (userData) => {
             </div>
             <p className="text-[7px] text-gray-600 mt-4 font-mono text-center uppercase tracking-widest italic font-bold">Target: {playerData?.studyHours}H/Day</p>
           </div>
+
+          {/* BACKLOG PANEL */}
+          {backlog.length > 0 && (
+            <div className="bg-red-950/10 border-2 border-red-900/30 p-5 shadow-xl">
+                <h2 className="text-[10px] font-black text-red-500 uppercase tracking-[0.4em] mb-4 flex items-center gap-3 italic"><AlertTriangle size={14}/> Penalty Quests</h2>
+                <div className="space-y-3">
+                    {backlog.map((q, i) => (
+                        <div key={i} className="flex justify-between items-center group">
+                            <div>
+                                <p className="text-[7px] text-red-900 font-bold uppercase">{q.book.split(' ')[0]}</p>
+                                <p className="text-[9px] text-white font-black uppercase italic truncate max-w-[120px]">{q.topic}</p>
+                            </div>
+                            <button onClick={() => clearQuest(i, true)} className="border border-red-900 text-red-600 px-3 py-1 text-[8px] font-black uppercase hover:bg-red-600 hover:text-white transition-all italic">Clear</button>
+                        </div>
+                    ))}
+                </div>
+            </div>
+          )}
 
           <div className="bg-[#080808] border border-gray-900 p-5 relative overflow-hidden">
             <h2 className="text-[10px] font-black text-system-blue uppercase tracking-[0.4em] mb-5 flex items-center gap-3 italic border-b border-gray-900 pb-1.5">
@@ -400,8 +417,8 @@ const generateNewDailyQuests = useCallback(async (userData) => {
               >
                 <div className="flex justify-between items-center relative z-10">
                   <div className="max-w-[75%]">
-                    <p className="text-[8px] font-black text-system-blue uppercase tracking-[0.4em] mb-1 italic">
-                      Grimoire: {quest.book.split(' - ')[0]}
+                    <p className={`text-[8px] font-black uppercase tracking-[0.4em] mb-1 italic ${quest.type === 'emergency' ? 'text-red-600' : 'text-system-blue'}`}>
+                      {quest.type ? quest.book : `Grimoire: ${quest.book.split(' - ')[0]}`}
                     </p>
                     <h3 className={`text-xl font-black italic uppercase tracking-tighter leading-tight ${quest.completed ? 'text-gray-600 line-through' : 'text-white group-hover:text-system-blue'}`}>
                       {quest.topic}
@@ -414,13 +431,12 @@ const generateNewDailyQuests = useCallback(async (userData) => {
                   ) : (
                     <button 
                       onClick={() => { setActiveQuestIndex(i); setIsRaidActive(true); }} 
-                      className="border border-system-blue text-system-blue px-8 py-2.5 font-black italic uppercase text-[10px] hover:bg-system-blue hover:text-black transition-all active:scale-95"
+                      className={`border-2 px-8 py-2.5 font-black italic uppercase text-[10px] transition-all active:scale-95 ${quest.type === 'emergency' ? 'border-red-600 text-red-600 hover:bg-red-600 hover:text-black shadow-[0_0_15px_rgba(255,0,0,0.2)]' : 'border-system-blue text-system-blue hover:bg-system-blue hover:text-black shadow-[0_0_15px_rgba(0,242,255,0.1)]'}`}
                     >
-                      Raid
+                      {quest.type === 'emergency' ? 'RAID DUNGEON' : 'Raid'}
                     </button>
                   )}
                 </div>
-                {/* Visual HUD Skew Background Effect */}
                 <div className="absolute top-0 right-0 w-24 h-full bg-gradient-to-l from-system-blue/5 to-transparent skew-x-12 translate-x-12 group-hover:translate-x-6 transition-transform duration-700"></div>
               </div>
             ))}
@@ -432,7 +448,7 @@ const generateNewDailyQuests = useCallback(async (userData) => {
           </div>
         </div>
 
-        {/* RIGHT PANEL: INVENTORY & LOGS */}
+        {/* RIGHT PANEL */}
         <div className="lg:col-span-3 space-y-6">
           <div className="bg-[#080808] border-2 border-gray-900 p-5 shadow-2xl relative overflow-hidden">
              <div className="absolute -top-5 -right-5 opacity-5 rotate-12"><Cpu size={100}/></div>
@@ -442,7 +458,7 @@ const generateNewDailyQuests = useCallback(async (userData) => {
              <div className="space-y-4">
                {playerData?.books?.map((b, i) => (
                  <div key={i} className="flex flex-col border-b border-gray-900/50 pb-3 last:border-0 group cursor-default">
-                   <span className="text-[7px] text-system-purple font-black uppercase mb-0.5 italic opacity-60">Slot: 0{i+1}</span>
+                   <span className="text-[7px] text-system-purple font-black uppercase mb-0.5 italic">Slot: 0{i+1}</span>
                    <span className="text-[10px] font-black text-gray-500 group-hover:text-white uppercase italic truncate tracking-tight transition-all group-hover:translate-x-1">
                      {b}
                    </span>
@@ -457,9 +473,7 @@ const generateNewDailyQuests = useCallback(async (userData) => {
              </h2>
              <div className="max-h-40 overflow-y-auto custom-scrollbar pr-2 space-y-3">
                {playerData?.completedChapters?.slice(-5).reverse().map((item, i) => (
-                 <div key={i} className="text-[8px] border-l-2 border-system-blue pl-3 py-0.5 bg-system-blue/5">
-                    <p className="text-white font-bold leading-tight uppercase truncate">{item.split(':')[1]}</p>
-                 </div>
+                 <div key={i} className="text-[8px] border-l-2 border-system-blue pl-3 py-0.5 bg-system-blue/5 italic font-bold text-white uppercase truncate">{item.split(':')[1]}</div>
                ))}
              </div>
           </div>
