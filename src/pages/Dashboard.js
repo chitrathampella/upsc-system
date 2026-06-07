@@ -13,11 +13,11 @@ import Logo from '../components/Logo';
 const Dashboard = ({ user }) => {
   const navigate = useNavigate();
   
-  // --- SYSTEM DATA STATES ---
+  // --- CORE SYSTEM STATES ---
   const [playerData, setPlayerData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dailyQuests, setDailyQuests] = useState([]);
-  const [backlog, setBacklog] = useState([]); // This is your Penalty Box
+  const [backlog, setBacklog] = useState([]); 
   const [timeLeft, setTimeLeft] = useState("");
   const [leaderboard, setLeaderboard] = useState([]);
   
@@ -27,16 +27,16 @@ const Dashboard = ({ user }) => {
   const [isRaidActive, setIsRaidActive] = useState(false);
   const [activeQuestIndex, setActiveQuestIndex] = useState(null);
 
-  // --- STOPWATCH STATES ---
+  // --- STOPWATCH / MANA STATES ---
   const [isTimerActive, setIsTimerActive] = useState(false);
   const [sessionSeconds, setSessionSeconds] = useState(0);
   const [totalSecondsToday, setTotalSecondsToday] = useState(0);
 
-  // --- 1. DYNAMIC SYSTEM LOGIC (REACTIVE ENGINE) ---
+  // --- 1. DYNAMIC SYSTEM LOGIC (REACTIVE STATS ENGINE) ---
   const stats = useMemo(() => {
-    if (!playerData) return { stamina: 0, mana: 0, rank: "E-RANK" };
+    if (!playerData) return { stamina: 0, mana: 0, rank: "E-RANK", totalHours: 0 };
 
-    // MANA: Reactive to live Stopwatch vs Daily Goal (Set in Settings)
+    // MANA: Based on Study Seconds vs Daily Goal Hours (Reactive to Stopwatch)
     const targetSeconds = (playerData.studyHours || 4) * 3600;
     const currentSeconds = totalSecondsToday + sessionSeconds;
     const manaPercent = Math.min(Math.round((currentSeconds / targetSeconds) * 100), 100);
@@ -46,42 +46,50 @@ const Dashboard = ({ user }) => {
     const xpTowardsNextLevel = currentXP % 500;
     const staminaPercent = Math.round((xpTowardsNextLevel / 500) * 100);
 
-    // RANK: Automated scaling
+    // RANK: Automated scaling based on LVL
     let rank = "E-RANK";
     if (playerData.level > 50) rank = "S-RANK";
+    else if (playerData.level > 35) rank = "A-RANK";
     else if (playerData.level > 20) rank = "B-RANK";
+    else if (playerData.level > 10) rank = "C-RANK";
     else if (playerData.level > 5) rank = "D-RANK";
 
     return { 
-        mana: manaPercent, 
-        stamina: staminaPercent, 
-        rank, 
-        xpProgress: xpTowardsNextLevel,
-        totalSecs: currentSeconds 
+      mana: manaPercent, 
+      stamina: staminaPercent, 
+      rank, 
+      xpProgress: xpTowardsNextLevel,
+      totalHours: (currentSeconds / 3600).toFixed(1)
     };
   }, [playerData, totalSecondsToday, sessionSeconds]);
 
-  // --- 2. DOWNLOAD ID LOGIC ---
-  const downloadID = () => {
-    window.print(); // Triggers the browser print/save PDF dialog
+  // --- 2. DATABASE: FETCH LEADERBOARD ---
+  const fetchLeaderboard = async () => {
+    try {
+      const q = query(collection(db, "users"), orderBy("level", "desc"), limit(5));
+      const querySnapshot = await getDocs(q);
+      setLeaderboard(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    } catch (e) {
+      console.error("Leaderboard Sync Failure", e);
+    }
   };
 
-  // --- 3. QUEST GENERATOR (WITH BACKLOG MIGRATION) ---
+  // --- 3. QUEST ENGINE: GENERATOR WITH BACKLOG MIGRATION ---
   const generateNewDailyQuests = useCallback(async (userData, daysMissed = 0, oldQuests = []) => {
     const today = new Date().toISOString().split('T')[0];
     const dayOfWeek = new Date().getDay(); // 0=Sun, 6=Sat
     const completed = userData.completedChapters || [];
     
-    // BACKLOG MIGRATION: Any quest from the past that isn't completed becomes a Penalty
-    const unfinished = (oldQuests || []).filter(q => !q.completed);
-    let newBacklog = [...(userData.backlog || []), ...unfinished];
+    // BACKLOG MIGRATION: Move yesterday's unfinished to Penalty Box
+    const unfinishedFromYesterday = (oldQuests || []).filter(q => !q.completed);
+    let newBacklog = [...(userData.backlog || []), ...unfinishedFromYesterday];
 
-    // If user missed multiple days, add "Missed Training" penalties
+    // If user missed multiple days, add "Missed Training" generic penalties
     if (daysMissed > 1) {
         for (let i = 0; i < Math.min(daysMissed, 7); i++) {
             newBacklog.push({
-                book: "SYSTEM",
-                topic: `Missed Training - Day Gap 0${i + 1}`,
+                book: "SYSTEM_PENALTY",
+                topic: `Missed Training Session - Day Gap 0${i + 1}`,
                 hours: 2,
                 completed: false,
                 type: 'penalty'
@@ -94,11 +102,11 @@ const Dashboard = ({ user }) => {
     // --- WEEKEND SPECIAL EVENTS ---
     if (dayOfWeek === 6) { // SATURDAY
         newQuests.push({ book: "SYSTEM", topic: "Weekly Current Affairs Recap", hours: 3, completed: false, type: 'special' });
-        newQuests.push({ book: "MAINTENANCE", topic: "Core Revision Cycle", hours: userData.studyHours, completed: false, type: 'special' });
+        newQuests.push({ book: "MAINTENANCE", topic: "Core Revision: All Weekly Topics", hours: userData.studyHours, completed: false, type: 'special' });
     } else if (dayOfWeek === 0) { // SUNDAY
         newQuests.push({ book: "EMERGENCY", topic: "Full Length Mock Dungeon (GS + CSAT)", hours: 4, completed: false, type: 'emergency' });
     } else {
-        // WEEKDAYS
+        // WEEKDAYS: SYLLABUS PROGRESSION
         userData.books.forEach(userBookTitle => {
           const bookData = SYLLABUS_DATA.find(b => 
             b.title === userBookTitle || userBookTitle.toLowerCase().includes(b.subject.toLowerCase())
@@ -106,7 +114,12 @@ const Dashboard = ({ user }) => {
           if (bookData) {
             const next = bookData.chapters.find(chap => !completed.some(c => c.includes(chap.title)));
             if (next) {
-              newQuests.push({ book: bookData.title, topic: next.title, hours: next.hours || 2, completed: false });
+              newQuests.push({ 
+                book: bookData.title, 
+                topic: next.title, 
+                hours: next.hours || 2, 
+                completed: false 
+              });
             }
           }
         });
@@ -124,7 +137,7 @@ const Dashboard = ({ user }) => {
     setTotalSecondsToday(0);
   }, [user.uid]);
 
-  // --- 4. DATA SYNCING ---
+  // --- 4. PLAYER DATA SYNC ---
   const fetchPlayerData = useCallback(async () => {
     if (!user?.uid) return;
     try {
@@ -135,28 +148,31 @@ const Dashboard = ({ user }) => {
         setTotalSecondsToday(data.studyTimeToday || 0);
         setBacklog(data.backlog || []);
         
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayObj = new Date();
+        const todayStr = todayObj.toISOString().split('T')[0];
         const lastDateStr = data.lastQuestDate || "";
 
-        // CHECK IF DATE CHANGED: If yes, trigger the backlog migration
+        // Check for date change to trigger Backlog Migration
         if (lastDateStr !== todayStr) {
-          const lastDate = new Date(lastDateStr);
-          const diffDays = Math.floor(Math.abs(new Date() - lastDate) / (1000 * 60 * 60 * 24));
+          const lastDate = new Date(lastDateStr || todayStr);
+          const diffDays = Math.floor(Math.abs(todayObj - lastDate) / (1000 * 60 * 60 * 24));
           generateNewDailyQuests(data, diffDays, data.currentQuests || []);
         } else {
           setDailyQuests(data.currentQuests || []);
         }
 
-        const lbSnap = await getDocs(query(collection(db, "users"), orderBy("level", "desc"), limit(5)));
-        setLeaderboard(lbSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        fetchLeaderboard();
       } else {
         navigate('/onboarding');
       }
-    } catch (e) { console.error("System Sync Error", e); }
-    finally { setLoading(false); }
+    } catch (e) {
+      console.error("Critical Sync Failure", e);
+    } finally {
+      setLoading(false);
+    }
   }, [user, navigate, generateNewDailyQuests]);
 
-  // --- 5. TIMERS ---
+  // --- 5. TIMERS (CHRONO & STOPWATCH) ---
   useEffect(() => {
     fetchPlayerData();
     const interval = setInterval(() => {
@@ -173,7 +189,8 @@ const Dashboard = ({ user }) => {
   }, [fetchPlayerData]);
 
   useEffect(() => {
-    let t; if (isTimerActive) t = setInterval(() => setSessionSeconds(p => p + 1), 1000);
+    let t;
+    if (isTimerActive) t = setInterval(() => setSessionSeconds(p => p + 1), 1000);
     return () => clearInterval(t);
   }, [isTimerActive]);
 
@@ -197,21 +214,16 @@ const Dashboard = ({ user }) => {
     const newXP = (playerData.xp || 0) + 100;
     const newLvl = Math.floor(newXP / 500) + 1;
 
-    // MANA CREDIT: Adds 1 hour focus time to the bar for every quest cleared
-    const manaBonus = 3600;
-    const newTotalStudyTime = (playerData.studyTimeToday || 0) + manaBonus;
+    // MANA CREDIT: Adds 1 hour focus credit per quest
+    const manaBonus = 3600; 
+    const newTotalTime = (playerData.studyTimeToday || 0) + manaBonus;
 
     const chapterId = `${quest.book}:${quest.topic}`;
     const newHistory = (quest.type === 'special' || quest.type === 'emergency') 
         ? (playerData.completedChapters || []) 
         : [...(playerData.completedChapters || []), chapterId];
 
-    const dbUpdates = { 
-        completedChapters: newHistory, 
-        xp: newXP, 
-        level: newLvl, 
-        studyTimeToday: newTotalStudyTime 
-    };
+    const dbUpdates = { completedChapters: newHistory, xp: newXP, level: newLvl, studyTimeToday: newTotalTime };
 
     if (isBacklog) {
         const filteredBacklog = backlog.filter((_, i) => i !== index);
@@ -224,67 +236,60 @@ const Dashboard = ({ user }) => {
     }
 
     await updateDoc(doc(db, "users", user.uid), dbUpdates);
-    
-    // Local State Force Update
-    setPlayerData(prev => ({ 
-        ...prev, 
-        level: newLvl, 
-        xp: newXP, 
-        completedChapters: newHistory, 
-        studyTimeToday: newTotalStudyTime 
-    }));
-    setTotalSecondsToday(newTotalStudyTime);
+    setPlayerData(prev => ({ ...prev, level: newLvl, xp: newXP, completedChapters: newHistory, studyTimeToday: newTotalTime }));
+    setTotalSecondsToday(newTotalTime);
     setIsRaidActive(false);
-    setActiveQuestIndex(null);
   };
 
-  const formatTime = (s) => `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ${s % 60}s`;
-
+  // --- 7. RENDER ---
   if (loading) return (
     <div className="h-screen bg-black flex flex-col items-center justify-center text-system-blue font-system italic animate-pulse tracking-[1em]">
       <Cpu className="mb-6 animate-spin" size={50} />
-      INITIALIZING_SOVEREIGN_CORE...
+      INITIALIZING_CORE...
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-system italic p-4 md:p-12 select-none overflow-x-hidden">
+    <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-system italic p-4 md:p-6 select-none overflow-x-hidden">
       
-      {/* --- MODAL: STATUS WINDOW (ID CARD) --- */}
+      {/* --- MODAL: STATUS WINDOW --- */}
       {showStatus && (
-        <div className="fixed inset-0 z-[120] bg-black/95 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#0a0a0c] border-2 border-system-blue w-full max-w-md p-10 relative shadow-[0_0_60px_#00f2ff33]">
-            <button onClick={() => setShowStatus(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"><X/></button>
+        <div className="fixed inset-0 z-[120] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#0a0a0c] border-2 border-system-blue w-full max-w-md p-10 relative shadow-[0_0_60px_rgba(0,242,255,0.3)]">
+            <button onClick={() => setShowStatus(false)} className="absolute top-4 right-4 text-gray-600 hover:text-white transition-colors"><X/></button>
             <div className="flex justify-between items-start mb-12">
                 <Logo size={70} />
                 <div className="text-right">
-                    <p className="text-[10px] text-system-blue font-black uppercase tracking-[0.4em] mb-1 italic">Hunter Profile</p>
+                    <p className="text-[10px] text-system-blue font-black uppercase tracking-widest italic">Hunter Profile Card</p>
                     <p className="text-3xl font-black text-white italic uppercase tracking-tighter">{playerData.name}</p>
                 </div>
             </div>
             <div className="space-y-6 font-mono text-sm">
-                <div className="flex justify-between border-b border-gray-800 pb-2"><span className="text-gray-500">RANK</span><span className="text-system-purple font-black">{stats.rank}</span></div>
-                <div className="flex justify-between border-b border-gray-800 pb-2"><span className="text-gray-500">LEVEL</span><span className="text-white font-black">{playerData.level}</span></div>
-                <div className="flex justify-between border-b border-gray-800 pb-2"><span className="text-gray-500">CONQUESTS</span><span className="text-system-blue font-black">{playerData.completedChapters?.length || 0}</span></div>
-                <div className="flex justify-between border-b border-gray-800 pb-2"><span className="text-gray-500">STAMINA</span><span className="text-system-accent font-black uppercase italic">{formatTime(totalSecondsToday + sessionSeconds)}</span></div>
+                <div className="flex justify-between border-b border-gray-800 pb-2"><span className="text-gray-500">RANK STATUS</span><span className="text-system-purple font-black">{stats.rank}</span></div>
+                <div className="flex justify-between border-b border-gray-800 pb-2"><span className="text-gray-500">POWER LEVEL</span><span className="text-white font-black">0{playerData.level}</span></div>
+                <div className="flex justify-between border-b border-gray-800 pb-2"><span className="text-gray-500">CONQUEST DATA</span><span className="text-system-blue font-black">{playerData.completedChapters?.length || 0} CH</span></div>
+                <div className="flex justify-between border-b border-gray-800 pb-2"><span className="text-gray-500">MANA USED</span><span className="text-system-accent font-black uppercase italic">{formatTime(totalSecondsToday + sessionSeconds)}</span></div>
             </div>
-            <div className="mt-12 flex gap-4">
-                <button onClick={downloadID} className="flex-1 bg-system-blue/10 border border-system-blue text-system-blue py-4 font-black uppercase text-[10px] tracking-widest hover:bg-system-blue hover:text-black transition-all flex items-center justify-center gap-2"><Download size={14}/> Save ID Card</button>
-            </div>
+            <button onClick={() => window.print()} className="w-full mt-10 bg-system-blue/10 border border-system-blue text-system-blue py-3 font-black uppercase text-[10px] tracking-widest hover:bg-system-blue hover:text-black transition-all flex items-center justify-center gap-3">
+                <Download size={14}/> Download Hunter_ID
+            </button>
           </div>
         </div>
       )}
 
-      {/* --- MODAL: SYSTEM HELP --- */}
+      {/* --- MODAL: HELP TAB --- */}
       {showHelp && (
         <div className="fixed inset-0 z-[120] bg-black/95 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-[#0a0a0c] border-2 border-system-purple w-full max-w-lg p-10 relative">
-            <button onClick={() => setShowHelp(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white"><X/></button>
-            <h2 className="text-3xl font-black text-system-purple uppercase mb-10 italic border-b border-gray-900 pb-4">Intelligence Tab</h2>
-            <div className="space-y-6 text-[11px] text-gray-400 font-mono leading-relaxed uppercase tracking-tighter">
-              <p><span className="text-system-blue font-black mr-2">STAMINA:</span> Syncs with XP. 5 clearances = 1 Level Up. Current Level: {playerData.level}</p>
-              <p><span className="text-system-purple font-black mr-2">MANA:</span> Daily study output vs goal. Quests also provide a 1-hour focus boost.</p>
-              <p><span className="text-red-500 font-black mr-2">PENALTY:</span> Missed daily training. Must be cleared to maintain system balance.</p>
+            <button onClick={() => setShowHelp(false)} className="absolute top-4 right-4 text-gray-600 hover:text-white"><X/></button>
+            <h2 className="text-3xl font-black text-system-purple uppercase mb-10 italic border-b border-gray-900 pb-4 flex items-center gap-4">
+               <Info size={28}/> System Intel
+            </h2>
+            <div className="space-y-6 text-[10px] text-gray-400 font-mono leading-relaxed uppercase tracking-tighter italic">
+              <p><span className="text-system-blue font-black mr-2">STAMINA (SYNC):</span> XP Progress toward LVL UP. Each clearance is 20% progress.</p>
+              <p><span className="text-system-purple font-black mr-2">MANA (OUTPUT):</span> Based on Live Stopwatch vs Daily Quota.</p>
+              <p><span className="text-red-500 font-black mr-2">PENALTY QUESTS:</span> Missed tasks from yesterday. Clear them to maintain sync.</p>
+              <p><span className="text-white font-black mr-2">RAID INSTANCE:</span> Deep focus mode. Only collect loot when objective is clear.</p>
             </div>
           </div>
         </div>
@@ -293,87 +298,92 @@ const Dashboard = ({ user }) => {
       {/* --- OVERLAY: RAID INSTANCE --- */}
       {isRaidActive && (
         <div className="fixed inset-0 z-[110] bg-black/98 flex flex-col items-center justify-center border-4 border-red-900/10 backdrop-blur-xl">
-          <Sword className="text-red-600 mb-10 animate-bounce shadow-[0_0_30px_rgba(255,0,0,0.5)]" size={85} />
+          <Sword className="text-red-600 mb-10 animate-bounce shadow-[0_0_30px_#ff0000]" size={80} />
           <h2 className="text-red-500 text-sm font-black tracking-[1em] mb-4 uppercase italic">Quest instance active</h2>
           <div className="text-center mb-16 max-w-2xl px-6">
-             <p className="text-gray-600 text-[10px] uppercase tracking-[0.5em] mb-4 italic">Operational Objective</p>
-             <h3 className="text-6xl font-black text-white italic uppercase tracking-tighter leading-tight">{dailyQuests[activeQuestIndex].topic}</h3>
+             <p className="text-gray-600 text-[10px] uppercase tracking-[0.5em] mb-4 italic">Mission Objective</p>
+             <h3 className="text-5xl font-black text-white italic uppercase tracking-tighter leading-tight drop-shadow-[0_0_20px_white]">{dailyQuests[activeQuestIndex].topic}</h3>
           </div>
-          <button onClick={() => clearQuest()} className="px-24 py-6 bg-system-blue text-black font-black uppercase shadow-[0_0_50px_#00f2ff] hover:scale-110 transition-all tracking-[0.3em] italic">Mark objective complete</button>
-          <button onClick={() => setIsRaidActive(false)} className="text-gray-700 hover:text-white transition-colors uppercase text-[10px] tracking-[0.8em] font-black mt-8">Escape instance</button>
-          <div className="absolute left-20 top-1/2 -translate-y-1/2 w-px h-96 bg-gradient-to-b from-transparent via-red-900/50 to-transparent"></div>
-          <div className="absolute right-20 top-1/2 -translate-y-1/2 w-px h-96 bg-gradient-to-b from-transparent via-red-900/50 to-transparent"></div>
+          <div className="flex flex-col gap-6 items-center">
+            <button 
+                onClick={() => clearQuest()} 
+                className="px-24 py-5 bg-system-blue text-black font-black uppercase shadow-[0_0_40px_#00f2ff] hover:scale-110 transition-all tracking-[0.3em] italic"
+            >
+              Clear objective
+            </button>
+            <button 
+                onClick={() => setIsRaidActive(false)} 
+                className="text-gray-700 hover:text-white transition-colors uppercase text-[10px] tracking-[0.8em] font-black mt-4"
+            >
+              Escape instance
+            </button>
+          </div>
         </div>
       )}
 
-      {/* --- HEADER HUD (THE TOP BAR) --- */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b-2 border-gray-900 pb-10 mb-12 gap-8 relative">
-        <div className="flex items-center gap-8">
-          <button onClick={() => setShowStatus(true)} className="relative group hover:scale-105 active:scale-95 transition-all">
-            <Logo size={75} />
+      {/* --- HEADER HUD --- */}
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b-2 border-gray-900 pb-5 mb-10 gap-8 relative">
+        <div className="flex items-center gap-6">
+          <button onClick={() => setShowStatus(true)} className="relative group transition-all hover:scale-105 active:scale-95">
+            <Logo size={55} />
             <div className="absolute -inset-2 bg-system-blue/10 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
           </button>
           <div>
-            <h1 className="text-7xl font-black italic tracking-tighter text-white uppercase leading-none">
-              {playerData?.name} <span className="text-system-blue text-3xl ml-3 font-normal italic">LVL {playerData?.level}</span>
+            <h1 className="text-4xl font-black italic tracking-tighter text-white uppercase leading-none">
+              {playerData?.name} <span className="text-system-blue text-xl ml-2 font-normal italic">LVL {playerData?.level}</span>
             </h1>
-            <div className="flex gap-4 mt-5">
-              <span className="text-[10px] text-system-purple font-black tracking-[0.4em] uppercase border-2 border-system-purple/30 px-5 py-1.5 bg-system-purple/5 shadow-[0_0_15px_rgba(112,0,255,0.2)] italic">{stats.rank}</span>
-              <span className="text-[10px] text-gray-500 font-bold border-2 border-gray-800 px-5 py-1.5 uppercase tracking-widest leading-none italic">Class: {playerData?.studentType}</span>
+            <div className="flex gap-3 mt-2">
+              <span className="text-[8px] text-system-purple font-black tracking-[0.4em] uppercase border border-system-purple/30 px-3 py-0.5 bg-system-purple/5 italic">{stats.rank}</span>
+              <span className="text-[8px] text-gray-500 font-bold border border-gray-800 px-3 py-0.5 uppercase tracking-widest leading-none italic">Class: {playerData?.studentType}</span>
             </div>
           </div>
         </div>
 
-        {/* --- LIVE MANA STOPWATCH --- */}
-        <div className="bg-[#0a0a0a] border-2 border-gray-800 p-5 flex items-center gap-12 shadow-2xl relative overflow-hidden group min-w-[380px]">
-            <div className="absolute top-0 left-0 h-full bg-system-blue/10 border-r border-system-blue/30 transition-all duration-1000" style={{width: `${stats.mana}%`}}></div>
-            <div className="relative z-10 flex items-center gap-5">
-                <Clock className={isTimerActive ? "text-system-blue animate-spin-slow" : "text-gray-700"} size={22} />
+        {/* STOPWATCH HUD */}
+        <div className="bg-[#0a0a0a] border-2 border-gray-800 p-3 flex items-center gap-10 shadow-xl relative overflow-hidden group min-w-[280px]">
+            <div className="absolute top-0 left-0 h-full bg-system-blue/5 border-r border-system-blue/30 transition-all duration-1000" style={{width: `${stats.mana}%`}}></div>
+            <div className="relative z-10 flex items-center gap-4">
+                <Clock className={isTimerActive ? "text-system-blue animate-spin-slow" : "text-gray-700"} size={18} />
                 <div>
-                    <p className="text-[9px] text-gray-500 font-black uppercase tracking-[0.4em] mb-1 italic">Mana extraction unit</p>
-                    <div className="text-4xl font-black text-white tracking-tighter font-mono leading-none">{formatTime(isTimerActive ? sessionSeconds : totalSecondsToday)}</div>
+                    <p className="text-[8px] text-gray-500 font-black uppercase tracking-[0.3em] mb-0.5 italic">Mana extraction</p>
+                    <div className="text-2xl font-black text-white tracking-tighter font-mono leading-none">{formatTime(isTimerActive ? sessionSeconds : totalSecondsToday)}</div>
                 </div>
             </div>
-            <button onClick={toggleStopwatch} className={`relative z-10 p-5 rounded-full transition-all active:scale-90 ${isTimerActive ? 'bg-red-900/20 text-red-500 border-2 border-red-500 shadow-[0_0_20px_#ff000033]' : 'bg-system-blue/20 text-system-blue border-2 border-system-blue shadow-[0_0_30px_#00f2ff44]'}`}>
-                {isTimerActive ? <Pause size={30} fill="currentColor" /> : <Play size={30} fill="currentColor" />}
+            <button onClick={toggleStopwatch} className={`relative z-10 p-3.5 rounded-full transition-all active:scale-90 ${isTimerActive ? 'bg-red-900/20 text-red-500 border border-red-500 shadow-[0_0_15px_#ff000022]' : 'bg-system-blue/20 text-system-blue border border-system-blue shadow-[0_0_20px_#00f2ff33]'}`}>
+                {isTimerActive ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
             </button>
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="text-right hidden xl:block"><p className="text-[8px] text-gray-600 font-black uppercase tracking-tighter mb-1 italic">System Stability</p><p className="text-[11px] font-mono text-system-accent tracking-widest font-black uppercase animate-pulse italic">OPTIMIZED</p></div>
-          <button onClick={() => setShowHelp(true)} className="p-2 text-gray-600 hover:text-system-purple transition-all"><Info size={28} /></button>
-          <button onClick={() => navigate('/library')} className="flex items-center gap-4 px-8 py-3 border-2 border-gray-800 hover:border-system-blue bg-black transition-all group shadow-2xl">
-            <Book size={22} className="text-system-blue group-hover:scale-125 transition-transform" />
-            <span className="text-[12px] font-black uppercase text-gray-500 group-hover:text-white tracking-[0.4em] italic">Archives</span>
-          </button>
-          <button onClick={() => navigate('/settings')} className="p-4 border-2 border-gray-800 rounded-sm hover:border-system-blue text-gray-500 hover:text-white transition-all bg-[#0a0a0a] group shadow-lg"><Settings size={28} className="group-hover:rotate-90 transition-transform duration-1000" /></button>
+        <div className="flex items-center gap-5">
+          <div className="text-right hidden xl:block"><p className="text-[8px] text-gray-600 font-black uppercase tracking-tighter mb-1">Status</p><p className="text-[10px] font-mono text-system-accent tracking-widest font-black uppercase animate-pulse italic">SYNC_ACTIVE</p></div>
+          <button onClick={() => setShowHelp(true)} className="p-2 text-gray-600 hover:text-system-purple transition-all"><Info size={24} /></button>
+          <button onClick={() => navigate('/library')} className="flex items-center gap-2 px-5 py-2 border-2 border-gray-800 hover:border-system-blue bg-black transition-all group shadow-xl"><Book size={18} className="text-system-blue group-hover:scale-110 transition-transform" /><span className="text-[10px] font-black uppercase text-gray-500 group-hover:text-white tracking-widest italic">Archives</span></button>
+          <button onClick={() => navigate('/settings')} className="p-2 border-2 border-gray-800 rounded-sm hover:border-system-blue text-gray-500 hover:text-white transition-all bg-[#0a0a0a] group"><Settings size={22} className="group-hover:rotate-90 transition-transform duration-1000" /></button>
         </div>
       </div>
 
-      {/* --- MAIN GRID LAYOUT --- */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
         {/* LEFT PANEL */}
         <div className="lg:col-span-3 space-y-10">
-          <div className="bg-[#080808] border-2 border-gray-900 p-8 shadow-2xl relative">
-            <div className="flex justify-between text-[10px] font-black text-system-blue mb-3 uppercase tracking-[0.2em] italic"><span>Stamina (Sync)</span><span>{stats.stamina}%</span></div>
-            <div className="h-2 bg-gray-900 rounded-full overflow-hidden border border-gray-800"><div className="h-full bg-system-blue shadow-[0_0_15px_#00f2ff] transition-all duration-1000" style={{width: `${stats.stamina}%`}}></div></div>
-            <div className="flex justify-between text-[10px] font-black text-system-purple mt-8 mb-3 uppercase tracking-[0.2em] italic"><span>Mana (Output)</span><span>{stats.mana}%</span></div>
-            <div className="h-2 bg-gray-900 rounded-full overflow-hidden border border-gray-800"><div className="h-full bg-system-purple shadow-[0_0_15px_#7000ff] transition-all duration-1000" style={{width: `${stats.mana}%`}}></div></div>
-            <p className="text-[9px] text-gray-700 mt-6 font-mono text-center uppercase tracking-widest font-black italic">Quota: {playerData?.studyHours}H_DAILY</p>
+          <div className="bg-[#080808] border-2 border-gray-900 p-6 shadow-xl relative overflow-hidden">
+            <div className="flex justify-between text-[8px] font-black text-system-blue mb-2 uppercase tracking-[0.2em] italic"><span>Stamina (Sync)</span><span>{stats.stamina}%</span></div>
+            <div className="h-1.5 bg-gray-900 rounded-full overflow-hidden border border-gray-800"><div className="h-full bg-system-blue shadow-[0_0_10px_#00f2ff] transition-all duration-1000" style={{width: `${stats.stamina}%`}}></div></div>
+            <div className="flex justify-between text-[8px] font-black text-system-purple mt-6 mb-2 uppercase tracking-[0.2em] italic"><span>Mana (Output)</span><span>{stats.mana}%</span></div>
+            <div className="h-1.5 bg-gray-900 rounded-full overflow-hidden border border-gray-800"><div className="h-full bg-system-purple shadow-[0_0_10px_#7000ff] transition-all duration-1000" style={{width: `${stats.mana}%`}}></div></div>
+            <p className="text-[7px] text-gray-700 mt-6 font-mono text-center uppercase tracking-widest font-black italic">Quota: {playerData?.studyHours}H_DAILY</p>
           </div>
 
-          {/* --- THE PENALTY BOX (BACKLOG) --- */}
+          {/* THE PENALTY BOX */}
           {backlog.length > 0 && (
-            <div className="bg-red-950/10 border-2 border-red-900/40 p-6 shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 bg-red-900 text-white text-[7px] px-3 py-1 font-black uppercase tracking-tighter">Instance_Overdue</div>
-                <h2 className="text-[12px] font-black text-red-500 uppercase tracking-[0.6em] mb-8 flex items-center gap-4 italic"><AlertTriangle size={18}/> Penalty quests</h2>
+            <div className="bg-red-950/10 border-2 border-red-900/40 p-5 shadow-2xl relative">
+                <h2 className="text-[11px] font-black text-red-500 uppercase tracking-[0.4em] mb-6 flex items-center gap-3 italic"><AlertTriangle size={16}/> Penalty quests</h2>
                 <div className="space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
                     {backlog.map((q, i) => (
                         <div key={i} className="flex justify-between items-center group bg-black/40 p-3 border border-red-900/20 border-l-4 border-l-red-600">
                             <div className="max-w-[140px]">
-                                <p className="text-[8px] text-red-900 font-black uppercase truncate italic">{q.book}</p>
-                                <p className="text-[11px] text-white font-black uppercase italic truncate tracking-tight">{q.topic}</p>
+                                <p className="text-[7px] text-red-900 font-bold uppercase truncate italic">{q.book}</p>
+                                <p className="text-[10px] text-white font-black uppercase italic truncate tracking-tight">{q.topic}</p>
                             </div>
                             <button onClick={() => clearQuest(i, true)} className="border-2 border-red-900 text-red-500 px-4 py-1.5 text-[9px] font-black uppercase hover:bg-red-600 hover:text-white transition-all italic active:scale-90">Clear</button>
                         </div>
@@ -382,75 +392,49 @@ const Dashboard = ({ user }) => {
             </div>
           )}
 
-          <div className="bg-[#080808] border-2 border-gray-900 p-8 relative overflow-hidden shadow-2xl">
-            <h2 className="text-[12px] font-black text-system-blue uppercase tracking-[0.6em] mb-10 flex items-center gap-4 italic border-b border-gray-900 pb-3"><Trophy size={18}/> Top hunters</h2>
-            <div className="space-y-6">{leaderboard.map((h, i) => (<div key={h.id} className="flex justify-between items-center text-[12px] border-b border-gray-900/50 pb-4 last:border-0 group"><span className="text-gray-500 uppercase italic font-bold">0{i+1} {h.name}</span><span className="text-system-blue font-black tracking-tighter italic">LVL {h.level}</span></div>))}</div>
-          </div>
-
-          <div className="bg-[#080808] border-2 border-gray-900 p-8 shadow-inner">
-            <h2 className="text-[11px] font-black text-gray-500 uppercase tracking-[0.6em] mb-6 flex items-center gap-4 border-b border-gray-900 pb-3 italic"><Terminal size={16}/> System logs</h2>
-            <div className="font-mono text-[9px] text-gray-600 space-y-2.5 italic leading-relaxed">
-              <p>[System] User_ID {playerData?.name?.toUpperCase()} Verified.</p>
-              <p>[Data] {playerData?.completedChapters?.length} Dungeons Conquered.</p>
-              <p className="text-system-blue animate-pulse">[Alert] Time Reset: {timeLeft}</p>
-              <p className="text-system-purple">[Log] Extraction in progress...</p>
-            </div>
+          <div className="bg-[#080808] border-2 border-gray-900 p-6 shadow-2xl">
+            <h2 className="text-[11px] font-black text-system-blue uppercase tracking-[0.5em] mb-8 flex items-center gap-4 italic border-b border-gray-900 pb-2"><Trophy size={18}/> Top hunters</h2>
+            <div className="space-y-5">{leaderboard.map((h, i) => (<div key={h.id} className="flex justify-between items-center text-[11px] border-b border-gray-900/50 pb-4 last:border-0 opacity-60"><span className="text-gray-500 uppercase italic font-bold">0{i+1} {h.name}</span><span className="text-system-blue font-black tracking-tighter italic">LVL {h.level}</span></div>))}</div>
           </div>
         </div>
 
-        {/* --- CENTER: THE TO-DO LIST --- */}
-        <div className="lg:col-span-6 space-y-12">
-          <div className="flex justify-between items-end px-4 border-b-2 border-gray-900 pb-4">
-            <h2 className="text-4xl font-black text-white flex items-center gap-6 uppercase italic tracking-tighter">
-              <Zap size={35} className="text-system-blue" fill="currentColor" /> Active Directives
-            </h2>
-            <div className="text-[12px] font-mono text-system-blue border-2 border-gray-800 px-6 py-2 tracking-[0.3em] font-black uppercase italic shadow-2xl shadow-blue-900/5">Reset: {timeLeft}</div>
+        {/* CENTER PANEL */}
+        <div className="lg:col-span-6 space-y-10">
+          <div className="flex justify-between items-end px-2 border-b-2 border-gray-900 pb-3">
+            <h2 className="text-3xl font-black text-white flex items-center gap-5 uppercase italic tracking-tighter"><Zap size={28} className="text-system-blue" fill="currentColor" /> Active Directives</h2>
+            <div className="text-[11px] font-mono text-system-blue border border-gray-800 px-4 py-1.5 tracking-widest font-black uppercase shadow-2xl">Reset: {timeLeft}</div>
           </div>
-
-          <div className="space-y-8">
+          <div className="space-y-6">
             {dailyQuests.map((quest, i) => (
-              <div key={i} className={`group relative border-2 transition-all duration-500 ${quest.completed ? 'bg-black/40 border-gray-900 opacity-40 shadow-none' : 'bg-[#0a0a0a] border-gray-800 hover:border-system-blue shadow-2xl'} p-10 overflow-hidden`}>
+              <div key={i} className={`group relative border-2 transition-all duration-300 ${quest.completed ? 'bg-black/40 border-gray-900 opacity-40 shadow-none' : 'bg-[#0a0a0a] border-gray-800 hover:border-system-blue shadow-2xl'} p-8 overflow-hidden`}>
                 <div className="flex justify-between items-center relative z-10">
                   <div className="max-w-[75%]">
-                    <p className={`text-[11px] font-black uppercase tracking-[0.6em] mb-3 italic ${quest.type ? 'text-red-500' : 'text-system-blue'}`}>{quest.type ? quest.book : `Grimoire: ${quest.book.split(' - ')[0]}`}</p>
-                    <h3 className={`text-4xl font-black italic uppercase tracking-tighter leading-tight transition-colors ${quest.completed ? 'text-gray-600 line-through' : 'text-white group-hover:text-system-blue'}`}>{quest.topic}</h3>
-                    {!quest.completed && <p className="text-[11px] text-gray-600 font-bold mt-6 uppercase tracking-[0.4em] italic flex items-center gap-4"><Activity size={14}/> Energy Required: {quest.hours}H</p>}
+                    <p className={`text-[9px] font-black uppercase tracking-[0.5em] mb-1 italic ${quest.type ? 'text-red-500' : 'text-system-blue'}`}>{quest.type ? quest.book : `Grimoire: ${quest.book.split(' - ')[0]}`}</p>
+                    <h3 className={`text-2xl font-black italic uppercase tracking-tighter leading-tight ${quest.completed ? 'text-gray-600 line-through' : 'text-white group-hover:text-system-blue transition-colors'}`}>{quest.topic}</h3>
+                    {!quest.completed && <p className="text-[10px] text-gray-600 font-bold mt-4 uppercase tracking-[0.2em] italic flex items-center gap-3"><Activity size={12}/> Energy Required: {quest.hours}H</p>}
                   </div>
-                  {quest.completed ? <CheckCircle2 size={60} className="text-system-blue shadow-[0_0_20px_#00f2ff]" /> : (
-                    <button onClick={() => { setActiveQuestIndex(i); setIsRaidActive(true); }} className={`border-2 px-14 py-5 font-black italic uppercase text-sm transition-all active:scale-95 shadow-[0_0_25px_rgba(0,242,255,0.15)] flex items-center gap-4 ${quest.type ? 'border-red-600 text-red-600 hover:bg-red-600 hover:text-black' : 'border-system-blue text-system-blue hover:bg-system-blue hover:text-black'}`}><Sword size={20}/> Raid</button>
+                  {quest.completed ? <CheckCircle2 size={45} className="text-system-blue shadow-[0_0_20px_#00f2ff]" /> : (
+                    <button onClick={() => { setActiveQuestIndex(i); setIsRaidActive(true); }} className={`border-2 px-10 py-3 font-black italic uppercase text-xs transition-all active:scale-95 shadow-[0_0_15px_rgba(0,242,255,0.15)] flex items-center gap-3 ${quest.type === 'emergency' ? 'border-red-600 text-red-600 hover:bg-red-600 hover:text-black' : 'border-system-blue text-system-blue hover:bg-system-blue hover:text-black'}`}><Sword size={16}/> Raid</button>
                   )}
                 </div>
-                <div className="absolute top-0 right-0 w-48 h-full bg-gradient-to-l from-system-blue/5 to-transparent skew-x-12 translate-x-32 pointer-events-none group-hover:translate-x-12 transition-transform duration-1000"></div>
-                <div className="absolute bottom-0 left-0 w-2 h-0 group-hover:h-full bg-system-blue transition-all duration-700"></div>
+                <div className="absolute top-0 right-0 w-24 h-full bg-gradient-to-l from-system-blue/5 to-transparent skew-x-12 translate-x-12 group-hover:translate-x-6 transition-transform duration-700"></div>
               </div>
             ))}
-            {dailyQuests.length === 0 && <div className="p-24 border-2 border-dashed border-gray-900 text-center opacity-30 italic"><p className="text-2xl font-black uppercase tracking-[1em]">Quest_Pool_Empty</p></div>}
           </div>
         </div>
 
-        {/* --- RIGHT PANEL --- */}
+        {/* RIGHT PANEL */}
         <div className="lg:col-span-3 space-y-10">
-          <div className="bg-[#080808] border-2 border-gray-900 p-8 shadow-2xl relative overflow-hidden">
-             <div className="absolute -top-10 -right-10 opacity-5 rotate-12"><Cpu size={150}/></div>
-             <h2 className="text-[12px] font-black text-system-purple uppercase tracking-[0.6em] mb-12 flex items-center gap-4 italic border-b border-gray-900 pb-3"><BookOpen size={20} className="text-system-purple" /> Inventory</h2>
-             <div className="space-y-7">
-               {playerData?.books?.map((b, i) => (
-                 <div key={i} className="flex flex-col border-b-2 border-gray-900/50 pb-5 last:border-0 group cursor-default">
-                   <div className="flex justify-between items-center mb-2"><span className="text-[9px] text-system-purple font-black uppercase italic opacity-60 group-hover:opacity-100 transition-opacity">Slot: 0{i+1}</span><Shield size={12} className="text-gray-800" /></div>
-                   <span className="text-sm font-black text-gray-500 group-hover:text-white uppercase italic truncate transition-all group-hover:translate-x-1 leading-none tracking-tighter">{b}</span>
-                 </div>
-               ))}
-             </div>
+          <div className="bg-[#080808] border-2 border-gray-900 p-6 shadow-2xl relative overflow-hidden">
+             <div className="absolute -top-5 -right-5 opacity-5 rotate-12"><Cpu size={100}/></div>
+             <h2 className="text-[10px] font-black text-system-purple uppercase tracking-[0.5em] mb-10 flex items-center gap-3 italic border-b border-gray-900 pb-2"><BookOpen size={16} className="text-system-purple" /> Inventory</h2>
+             <div className="space-y-5">{playerData?.books?.map((b, i) => (<div key={i} className="flex flex-col border-b border-gray-900/50 pb-4 last:border-0 group cursor-default"><div className="flex justify-between items-center mb-1"><span className="text-[7px] text-system-purple font-black uppercase italic opacity-60">Slot: 0{i+1}</span><Shield size={10} className="text-gray-800" /></div><span className="text-[10px] font-black text-gray-500 group-hover:text-white uppercase italic truncate transition-all group-hover:translate-x-1 leading-none tracking-tight">{b}</span></div>))}</div>
           </div>
-          <div className="bg-[#080808] border-2 border-gray-900 p-6">
-             <h2 className="text-[11px] font-black text-gray-500 uppercase tracking-[0.6em] mb-8 flex items-center gap-4 italic border-b border-gray-900 pb-3"><TrendingUp size={18}/> Conquests</h2>
-             <div className="max-h-64 overflow-y-auto custom-scrollbar pr-3 space-y-5">
-               {playerData?.completedChapters?.slice(-8).reverse().map((item, i) => (
-                 <div key={i} className="text-[10px] border-l-4 border-system-blue pl-5 py-2 bg-system-blue/5 italic font-black text-white uppercase truncate shadow-lg leading-tight border-r border-y border-gray-900">{item.split(':')[1]}</div>
-               ))}
-             </div>
+          <div className="bg-[#080808] border border-gray-900 p-5">
+             <h2 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.4em] mb-4 flex items-center gap-3 italic border-b border-gray-900 pb-1.5"><TrendingUp size={14}/> Conquests</h2>
+             <div className="max-h-40 overflow-y-auto custom-scrollbar pr-2 space-y-3">{playerData?.completedChapters?.slice(-5).reverse().map((item, i) => (<div key={i} className="text-[8px] border-l-2 border-system-blue pl-3 py-0.5 bg-system-blue/5 italic font-bold text-white uppercase truncate">{item.split(':')[1]}</div>))}</div>
           </div>
-          <div className="p-5 bg-system-blue/5 border-2 border-gray-900 flex items-center justify-between shadow-inner"><Database size={16} className="text-gray-800" /><p className="text-[9px] text-gray-700 font-mono tracking-widest uppercase font-black italic">Cloud_Sync: OPERATIONAL</p></div>
+          <div className="p-3 bg-system-blue/5 border border-gray-900 flex items-center justify-between shadow-inner shadow-black"><Database size={12} className="text-gray-800" /><p className="text-[7px] text-gray-700 font-mono tracking-widest uppercase font-black italic leading-none">V2.5.0_NOMINAL</p></div>
         </div>
       </div>
     </div>
