@@ -8,18 +8,24 @@ const Login = ({ setUser }) => {
   const [isRegistering, setIsRegistering] = useState(false);
 
   const handleAuth = async () => {
-    try {
-      let userCredential;
-      if (isRegistering) {
-        userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      } else {
-        userCredential = await signInWithEmailAndPassword(auth, email, password);
-      }
-      setUser(userCredential.user);
-    } catch (error) {
-      alert(error.message);
+  if (!email || !password) return alert("System requires full credentials.");
+  try {
+    let userCredential;
+    if (isRegistering) {
+      userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    } else {
+      userCredential = await signInWithEmailAndPassword(auth, email, password);
     }
-  };
+    // Only updates if successful
+    setUser(userCredential.user);
+  } catch (error) {
+    // Aggressive Error Handling
+    console.error(error.code);
+    if (error.code === 'auth/wrong-password') alert("ACCESS DENIED: Invalid Secret Code.");
+    else if (error.code === 'auth/user-not-found') alert("IDENTITY NOT FOUND: Register first.");
+    else alert("SYSTEM ERROR: " + error.message);
+  }
+};
 
   return (
     <div className="h-screen flex items-center justify-center bg-black font-system">
