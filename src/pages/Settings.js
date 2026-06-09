@@ -77,8 +77,7 @@ const Settings = ({ user }) => {
                 onChange={(e) => setFormData({...formData, name: e.target.value})}
               />
             </div>
-            // Inside your Settings component, add this to the Character Traits section:
-<div className="relative group">
+            <div className="relative group">
   <label className="text-[9px] text-system-purple font-black uppercase tracking-[0.5em] mb-3 block">Avatar Link (URL)</label>
   <div className="absolute -left-2 top-8 w-1 h-10 bg-system-purple opacity-50"></div>
   <input 
