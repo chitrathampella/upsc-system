@@ -237,7 +237,7 @@ const Dashboard = ({ user }) => {
 
     // MANA CREDIT: Adds 1 hour focus credit per quest
     const manaBonus = 3600; 
-    const newTotalStudyTime = (playerData.studyTimeToday || 0) + manaBonus;
+    const newTotalTime = (playerData.studyTimeToday || 0) + manaBonus;
 
     const chapterId = `${quest.book}:${quest.topic}`;
     const newHistory = (quest.type === 'special' || quest.type === 'emergency') 
@@ -270,8 +270,8 @@ const Dashboard = ({ user }) => {
         setTimeout(() => setShowAriseOverlay(false), 4000);
     }
 
-    setPlayerData(prev => ({ ...prev, level: newLvl, xp: newXP, completedChapters: newHistory, studyTimeToday: newTotalStudyTime }));
-    setTotalSecondsToday(newTotalStudyTime);
+    setPlayerData(prev => ({ ...prev, level: newLvl, xp: newXP, completedChapters: newHistory, studyTimeToday: newTotalTime }));
+    setTotalSecondsToday(newTotalTime);
     setIsRaidActive(false);
   };
 
@@ -284,7 +284,7 @@ const Dashboard = ({ user }) => {
   );
 
   return (
-    <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-system italic p-4 md:p-6 select-none overflow-x-hidden">
+    <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-system italic p-4 md:p-6 select-none overflow-x-hidden animate-in fade-in duration-1000">
       
       {/* --- OVERLAY: ARISE EVENT --- */}
       {showAriseOverlay && (
